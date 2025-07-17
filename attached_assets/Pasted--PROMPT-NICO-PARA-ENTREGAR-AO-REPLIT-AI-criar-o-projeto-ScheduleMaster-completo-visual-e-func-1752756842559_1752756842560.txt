@@ -1,0 +1,110 @@
+**PROMPT ÚNICO PARA ENTREGAR AO REPLIT AI – criar o projeto “ScheduleMaster” completo, visual e funcional, sem códigos mock**
+
+---
+
+## 0. Resumo do que deve ser entregue
+
+* Monorepo **client / server / shared** totalmente configurado.
+* Integração exclusiva com **Firebase Firestore** & **Firebase Auth** (sem fallback JSON).
+* Interface responsiva, paleta **#e8781a** (primária) + cinza neutro (#f8f8f8), letras #222.
+* Visitante anônimo: **somente leitura**.
+* Usuário autenticado (email + senha Firebase): pode **Criar / Editar / Excluir**.
+* Páginas prontas, navegação, modais, CRUD completo, regras de negócio da escala mensal contínua implementadas.
+
+---
+
+## 1. Pastas & scripts (Replit deve gerar)
+
+```
+.
+├─ client/   (React + Vite + TS + Tailwind)
+├─ server/   (Express + TS)
+├─ shared/   (types)
+├─ .gitignore (inclui *.env*)
+└─ README.md (passos de dev e prod)
+```
+
+*Scripts*: `client/dev`, `server/dev`, `dev` raiz com `concurrently`.
+
+---
+
+## 2. Variáveis de ambiente que o Replit deve criar
+
+### client/.env.local
+
+```
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyA__g3xMaumvQcPMAexZ_xIRW8tR6Uh0ZM
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=parlacom-sistema.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=parlacom-sistema
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=parlacom-sistema.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=127863157655
+NEXT_PUBLIC_FIREBASE_APP_ID=1:127863157655:web:26d903fd1edbb3cc3c8ad2
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-3HFQKJCDEX
+```
+
+### server/.env.example (sem valores)
+
+```
+FIREBASE_SERVICE_ACCOUNT_JSON=
+FIREBASE_PROJECT_ID=parlacom-sistema
+```
+
+---
+
+## 3. Páginas e funcionalidades obrigatórias
+
+| Página / Modal         | URL / Trigger                     | Deve exibir                                                                                  | Deve permitir (apenas admin)                     | Observações de UI                                                                         |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| **Schedule** (default) | `/`                               | Calendário com modos **Mês / Semana / Dia**                                                  | • Editar dia (abre *DayEditModal*)               | Feriados com fundo #e8781a opacidade 20 %. Fim‑de‑semana sombreado. Hoje com borda brand. |
+| **Employees**          | `/employees`                      | Tabela paginada: Nome, Dias, Horários, Ativo, Ícones de lápis/lixeira                        | • Criar (abre *EmployeeModal*) • Editar, Excluir | Mostrar ícones só para admin.                                                             |
+| **Holidays**           | `/holidays`                       | Lista de feriados futuros (data + descrição)                                                 | • Criar, Editar, Excluir feriado                 | Ordem cronológica; destaque brand.                                                        |
+| **Rotation**           | `/rotation` (opcional)            | Estado atual do revezamento (quem é sábado / domingo na próxima semana)                      | • Ajustar manualmente                            | Campo “Salvar” protegido.                                                                 |
+| **LoginModal**         | Botão **“Login Admin”** no header | Form email + senha                                                                           | —                                                | Ao sucesso, fecha modal, refetch queries.                                                 |
+| **DayEditModal**       | Clique em um dia no Calendário    | Listar assignments (funcionário + horário)                                                   | • Adicionar/remover assignment • Alterar horário | Inputs horários aceitam `8:00`, `08:00` ou vazio.                                         |
+| **EmployeeModal**      | Botões “Novo” ou lápis            | Form: Nome, dias da semana (checkbox), horário geral, opção custom por dia, flag revezamento | —                                                | Validação Zod; default horário `08:00‑18:00` (exceto um dia `08:00‑17:00`).               |
+| **NotFound**           | qualquer rota desconhecida        | Mensagem 404 + link voltar                                                                   | —                                                | —                                                                                         |
+
+*Navegação*: header fixo com links “Escala”, “Funcionários”, “Feriados” + canto direito botão Login / Logout.
+
+---
+
+## 4. Comportamento visual & UX
+
+* **Cor primária:** `#e8781a` (botões brand, ícones ativos, labels feriado).
+* Tailwind classes: usar `bg-brand`, `text-brand` via extend.
+* Design mobile‑first; em >=768 px mostrar grid 3 col. no calendário mês.
+* Modais centralizados, backdrop `bg-black/40`.
+* Botões brand com hover mais escuro (`hover:bg-[#c96b14]`).
+* Ícones Radix UI ou Lucide; visibilidade condicional a `user != null`.
+* Toast simples (Radix Toast ou alert) para erros fetch / validações.
+
+---
+
+## 5. Regras de negócios que o Replit deve implementar
+
+1. **Geração mensal automática**: no primeiro acesso de um mês ausente, endpoint `POST /api/monthly-schedules/generate` cria documentos para todos os dias, aplicando:
+
+   * Horários fixos **ou** `customSchedule`.
+   * **Revezamento**: funcionários marcados como `weekendRotation=true` alternam sábado/domingo por semana par/ímpar.
+   * Se dia é feriado (match “MM‑DD”) ⇒ assignments vazios.
+2. **Validação horário**: string hh\:mm ou h\:mm aceita e normaliza para “HH\:MM”.
+3. **Leitura pública**: endpoints GET não exigem token.
+4. **Escrita**: endpoints protegidos verificam token com Firebase Admin.
+
+---
+
+## 6. Repositório de tipos (shared/)
+
+Replit deve criar interfaces para Employee, Holiday, Assignment, ScheduleEntry; front e back importam dali via ts‑path alias.
+
+---
+
+## 7. Fluxo de dados (React Query)
+
+* Chaves: `"employees"`, `"holidays"`, `"schedule-2025-07"`…
+* Após mutation → invalidar queries relacionadas.
+* Query fetcher injeta header `Authorization` se `auth.currentUser` existir.
+
+---
+
+
