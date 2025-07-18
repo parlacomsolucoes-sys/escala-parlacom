@@ -29,14 +29,11 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
   },
+  // vite.config.ts  (trecho server)
   server: {
-    fs: {
-      strict: true,
-      deny: ["**/.*"],
-    },
-    proxy: {
-      // encaminha qualquer request /api/* para o backend
-      "/api": "http://localhost:5000",
-    },
+    fs: { strict: true, deny: ["**/.*"] },
+    proxy: process.env.REPL_ID // variável setada automaticamente pelo Replit
+      ? undefined // ➜  desliga proxy no Replit
+      : { "/api": "http://localhost:5000" },
   },
 });

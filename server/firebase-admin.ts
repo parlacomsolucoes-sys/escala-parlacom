@@ -3,18 +3,21 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
-if (
-  !process.env.FIREBASE_PROJECT_ID ||
-  !process.env.FIREBASE_CLIENT_EMAIL ||
-  !process.env.FIREBASE_PRIVATE_KEY
-) {
+const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } =
+  process.env;
+
+if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
   throw new Error("Variáveis FIREBASE_* ausentes");
 }
 
+// remove aspas de início/fim se existirem e converte \n
+const cleanedKey = FIREBASE_PRIVATE_KEY.replace(/^"(.*)"$/, "$1") // tira aspas externas
+  .replace(/\\n/g, "\n"); // \n → quebras reais
+
 const serviceAccount = {
-  project_id: process.env.FIREBASE_PROJECT_ID,
-  client_email: process.env.FIREBASE_CLIENT_EMAIL,
-  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  project_id: FIREBASE_PROJECT_ID,
+  client_email: FIREBASE_CLIENT_EMAIL,
+  private_key: cleanedKey,
 };
 
 const app =
