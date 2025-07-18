@@ -163,20 +163,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // PHASE 4: Weekend schedule generation route
+  // PHASE 2: Weekend schedule generation route with idempotency
   app.post("/api/schedule/generate-weekends", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
-      const { year, month } = generateMonthlyScheduleSchema.parse(req.body);
-      const scheduleService = new ScheduleService();
-      const daysGenerated = await scheduleService.generateWeekendSchedule(year, month);
+      console.log(`[WEEKEND] Received request:`, req.body);
+      const { year, month, force = false } = req.body;
       
-      console.log(`[WeekendSchedule] Generated ${daysGenerated} weekend days for ${month}/${year}`);
+      // Validate parameters
+      if (!year || !month || isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+        return res.status(400).json({ 
+          message: "Invalid parameters", 
+          stage: "validation",
+          errorId: "INVALID_PARAMS" 
+        });
+      }
+      
+      console.log(`[WEEKEND] Starting weekend generation for ${month}/${year}, force=${force}`);
+      
+      const result = await scheduleService.generateWeekendSchedule(year, month, force);
+      
+      if (result.eligibleEmployees === 0) {
+        return res.status(422).json({
+          message: "No employees available for weekend rotation",
+          stage: "employee_check",
+          errorId: "NO_WEEKEND_EMPLOYEES"
+        });
+      }
+      
+      console.log(`[WEEKEND] ✅ Generated: ${result.daysGenerated} days, changed: ${result.changedCount}`);
       
       res.status(201).json({ 
         message: "Weekend schedule generated successfully",
-        daysGenerated,
+        daysGenerated: result.daysGenerated,
+        changedCount: result.changedCount,
+        skippedHolidays: result.skippedHolidays,
+        eligibleEmployees: result.eligibleEmployees,
+        totalWeekendDaysProcessed: result.totalWeekendDaysProcessed,
+        employeesUsed: result.employeesUsed,
         month,
-        year
+        year,
+        wasIdempotent: result.changedCount === 0
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -186,7 +212,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(500).json({ 
           message: "Failed to generate weekend schedule",
           detail: error.message,
-          code: error.code || "UNKNOWN_ERROR"
+          stage: "execution",
+          errorId: "EXECUTION_ERROR"
         });
       }
     }

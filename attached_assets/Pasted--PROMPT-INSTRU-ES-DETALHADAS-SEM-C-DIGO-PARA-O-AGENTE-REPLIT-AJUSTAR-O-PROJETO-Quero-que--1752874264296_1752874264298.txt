@@ -1,0 +1,237 @@
+**PROMPT (INSTRUÇÕES DETALHADAS – SEM CÓDIGO) PARA O AGENTE REPLIT AJUSTAR O PROJETO**
+
+Quero que você execute as correções e melhorias abaixo no projeto **Escala-Parlacom**. **Não escreva nada fora do escopo** e siga as fases em ordem. Antes de cada mudança:
+
+1. Confirmar arquivo/rota/componente existente.
+2. Criar backup (`.bak` ou `.old`).
+3. Aplicar mudança.
+4. Validar e registrar resultado (log interno e resumo final).
+
+---
+
+## CONTEXTO DOS PROBLEMAS ATUAIS
+
+1. **Rota de geração de escala de fim de semana** está retornando **500**.
+2. **Visualizações “Semana” e “Dia”** não estão funcionando corretamente (provavelmente não filtram / não usam a fonte de dados correta).
+3. Página de Escala precisa de **painel informativo** com:
+
+   * Próximo(s) finais de semana e quem ficará designado (preview da rotação).
+   * Próximos **3 feriados** (feriados recorrentes `MM-DD`).
+4. Facilidade para visualizar quem está escalado (melhor agrupamento / ordenação / destaque).
+5. Garantir que geração de fim de semana é **idempotente** (reexecutar não duplica assignments) e previsível (round-robin estável).
+
+---
+
+## FASE 1 – DIAGNÓSTICO DO ERRO 500 NA ROTA DE GERAÇÃO DE FIM DE SEMANA
+
+**Objetivo:** Identificar exatamente a causa (ex.: variáveis ausentes, falha ao acessar Firestore, parsing do body, employees vazios, lógica de rotação).
+
+**Instruções:**
+
+1. Localizar a rota criada anteriormente (`POST /api/schedule/generate-weekends` ou equivalente). Caso não exista, criar agora – ver Fase 2.
+2. Adicionar logs estruturados (antes de try/catch):
+
+   * Parâmetros recebidos (`year`, `month`).
+   * Quantidade de funcionários com `weekendRotation=true` retornados.
+   * Datas de sábados e domingos identificadas.
+3. Envolver lógica com try/catch e retornar JSON padronizado `{ message, stage, errorId }`.
+4. Capturar stack no log interno, mas **não** expor stack completa na resposta HTTP.
+5. Testar chamada manual com mês/ano atual. Registrar status real.
+6. Documentar causa raiz no relatório parcial antes de prosseguir.
+
+---
+
+## FASE 2 – (RE)IMPLEMENTAR ROTA DE GERAÇÃO DE FINAIS DE SEMANA (CASO NECESSÁRIO)
+
+**Objetivo:** Geração confiável e idempotente.
+
+**Regras de Negócio:**
+
+* Apenas sábados e domingos do mês especificado.
+* Ignorar feriados (base `MM-DD`).
+* Usar somente funcionários ativos `isActive=true` e com `weekendRotation=true`.
+* Round-robin estável: ordem baseada (ex.) em `createdAt` ou `name` (definir e manter).
+* Não duplicar assignments:
+
+  * Antes de atribuir para o dia, remover assignments existentes **apenas** desses funcionários de rotação (não tocar nos demais).
+* Se não houver funcionários elegíveis → retornar `422` com aviso.
+
+**Instruções Técnicas:**
+
+1. Validar body `{ year: number, month: number }`.
+2. Gerar lista de datas (UTC-safe): criar objeto Date iniciando em `new Date(year, month-1, 1)` até último dia.
+3. Filtrar `day.getDay() === 0 || 6`.
+4. Para cada data:
+
+   * Montar chave de feriado `MM-DD` e checar se está na lista.
+   * Recuperar documento de schedule do dia (se não existir, criar base vazia).
+   * Filtrar assignments removendo os de IDs correspondentes aos funcionários rotativos.
+   * Determinar índice do funcionário: usar contador avançando (persistência de “offset” opcional):
+
+     * Se quiser consistência entre gerações, pode armazenar (em collection “meta” ou doc `rotation_state`) o último index usado.
+     * Caso não implemente persistência de offset agora, aceite round-robin reiniciado a cada geração (documentar).
+   * Adicionar assignment novo com id padrão `employeeId-date`.
+5. Salvar documento (upsert).
+6. Coletar array de `{ date, employeeId }` retornado.
+7. Responder 200 com `{ updatedDays, totalWeekendDaysProcessed, skippedHolidays, employeesUsed }`.
+
+---
+
+## FASE 3 – AJUSTE / REPARO DAS VISUALIZAÇÕES “SEMANA” E “DIA”
+
+**Objetivo:** Filtrar corretamente a mesma fonte de dados mensal sem fazer novas chamadas redundantes.
+
+**Instruções:**
+
+1. Verificar componente `SchedulePage` e estado `viewMode`.
+2. Implementar função de derivação:
+
+   * **Month view:** já existente (grid 6×7).
+   * **Week view:** dado o “dia focal” (usar o primeiro dia “visível” ou o dia selecionado) calcular domingo→sábado (ou segunda→domingo se preferir – manter consistente com UI).
+   * **Day view:** apenas 1 dia; mostrar lista de assignments completa (expandida).
+3. Reaproveitar `scheduleEntries` já carregados; se o mês mudar, refetch.
+4. Garantir que seleção de dia troca para “day view” quando clicado (se for desejável) ou abrir modal sem mudar view – escolha uma UX coerente (documentar).
+5. Adicionar indicadores visuais:
+
+   * Fim de semana ⇒ cor diferenciada.
+   * Feriado ⇒ tag ou badge.
+6. Validar transições: mês → semana → dia e retorno.
+
+---
+
+## FASE 4 – PAINEL DE “PRÓXIMAS INFORMAÇÕES” NA PÁGINA DE ESCALA
+
+**Objetivo:** Exibir na parte superior (ou lateral) um painel com:
+
+1. **Próximo final de semana (sábado/domingo)** e qual funcionário está escalado (mostrar nome, horários).
+2. **Segundo próximo final de semana** (opcional se quiser 2 semanas).
+3. **Próximos 3 feriados** (a partir da data atual, percorrendo meses até achar 3).
+
+**Instruções:**
+
+1. Criar função utilitária para:
+
+   * Calcular a próxima ocorrência de `MM-DD` feriado a partir de hoje (se já passou neste ano, usar ano seguinte).
+   * Ordenar e pegar os 3 primeiros.
+2. Para finais de semana:
+
+   * Pegar datas de schedule futuras (>= hoje) com dayOfWeek 6 ou 0.
+   * Filtrar somente as que tenham assignment (ou mostrar “(Não gerado)” caso vazio).
+   * Exibir pelo menos o próximo; se disponível, mostrar o seguinte.
+3. UI: cards simples, com:
+
+   * Título: “Próximo Fim de Semana” / “Próximos Feriados”.
+   * Lista com data formatada (`dd/MM`) e funcionário ou feriado.
+4. Refetch/refresh automático quando gerar escala de fim de semana (invalidar cache / chamar novamente a função de derivação).
+5. Testar cenários:
+
+   * Sem escala gerada → mostrar aviso.
+   * Com escala parcialmente gerada.
+   * Sem feriados cadastrados → mostrar “Nenhum feriado cadastrado”.
+
+---
+
+## FASE 5 – MELHORIA DE LEGIBILIDADE DOS ASSIGNMENTS
+
+**Objetivo:** Facilitar visualização “quem está” num dia.
+
+**Instruções:**
+
+1. Ordenar assignments do dia por `employeeName` (case-insensitive) ou horário inicial.
+2. Limitar truncamento de nomes longos mas permitir tooltip (title) com nome completo.
+3. No dia com +N mais, ao clicar mostrar modal com lista completa (se ainda não existir).
+4. Atualizar modal de edição de dia para destacar claramente cada assignment.
+
+---
+
+## FASE 6 – PREVIEW DE ROTAÇÃO (FUTURO NÃO GERADO)
+
+**Objetivo:** Mostrar previsão de quem *ficaria* nos próximos sábados/domingos **se** gerar agora (útil quando ainda não gerado).
+
+**Instruções (opcional se fácil):**
+
+1. Com base em lista de funcionários rotativos ordenada, simular round-robin para próximos 4 finais de semana a partir da próxima data sem assignment.
+2. Exibir como “Prévia (não gerado)”.
+
+---
+
+## FASE 7 – IDOMPOTÊNCIA E SEGURANÇA DA ROTA DE GERAÇÃO
+
+**Objetivo:** Reexecutar rota não deve duplicar assignments.
+
+**Instruções:**
+
+1. Antes de inserir, verificar se já existe assignment para aquele `employeeId-date`. Se já existir e for o mesmo funcionário escolhido agora, não fazer nada.
+2. Se quiser permitir “regenerar” alterando rotação, permitir flag `force=true` no body para sobrescrever (remover assignments existentes e recalcular).
+3. Responder se houve alterações reais (`changedCount`) e se foi somente “idempotent hit”.
+
+---
+
+## FASE 8 – TESTES MANUAIS GUIADOS
+
+Realizar e listar resultados:
+
+| Teste | Ação                                       | Resultado Esperado                                     |
+| ----- | ------------------------------------------ | ------------------------------------------------------ |
+| 1     | Chamar geração sem funcionários de rotação | 422 e msg clara                                        |
+| 2     | Criar 2 funcionários rotativos, gerar      | Sáb A, Dom B (ou equivalente)                          |
+| 3     | Regerar sem `force`                        | Nenhuma mudança; `changedCount=0`                      |
+| 4     | Regerar com `force`                        | Pode reorganizar seguindo round-robin inicial          |
+| 5     | Semana view atual                          | Mostra somente 7 dias corretos                         |
+| 6     | Day view click                             | Lista assignments completos                            |
+| 7     | Painel próximos feriados                   | Exibe 3 corretos                                       |
+| 8     | Painel próximos finais de semana           | Exibe próximo e status (gerado ou não)                 |
+| 9     | Prévia rotação (se implementada)           | Lista previsão coerente                                |
+| 10    | Feriado no sábado                          | Dia aparece sem assignment, painel ignora para rotação |
+
+Registrar tabela preenchida no relatório final.
+
+---
+
+## FASE 9 – LIMPEZA E LOGS
+
+**Instruções:**
+
+1. Garantir que logs não exponham private keys ou tokens.
+2. Prefácio de logs críticos: `[WEGEN]`, `[SCHEDULE]`, `[HOLIDAYS]`.
+3. Remover console.log ruidoso antigo.
+4. Padronizar mensagens de erro: `{ message, code?, details? }`.
+
+---
+
+## FASE 10 – RELATÓRIO FINAL
+
+Entregar (em texto):
+
+1. Lista de arquivos modificados.
+2. Causa raiz do 500 inicial.
+3. Resumo das mudanças implementadas por fase.
+4. Resultado da tabela de testes.
+5. Pendências ou recomendações futuras (ex: persistir offset de rotação global).
+
+---
+
+## CRITÉRIOS DE ACEITE
+
+* Rota de geração de fim de semana responde 200 com payload descritivo ou 422 conforme cenário.
+* Nenhum erro 500 não explicado nos logs ao gerar escala em condições normais.
+* Week view e Day view funcionais navegáveis.
+* Painel exibe próximos 3 feriados + próximo(s) plantonistas de fim de semana.
+* Idempotência confirmada.
+* Assignments visíveis claros por dia.
+* Prévia de rotação (se implementada) condizente.
+* Código limpo, sem vazamento de credenciais.
+
+---
+
+## OBSERVAÇÕES IMPORTANTES
+
+* **Não** alterar estrutura de autenticação existente.
+* **Não** remover funcionalidades existentes sem necessidade.
+* **Não** incluir dependências externas adicionais para lógica simples (evitar inflar o bundle).
+* Se encontrar incoerências ou nomes divergentes, adaptar mantendo intenção do requisito.
+
+---
+
+**EXECUTE TUDO NA ORDEM ACIMA E ENTREGUE O RELATÓRIO FINAL.**
+FIM DO PROMPT.

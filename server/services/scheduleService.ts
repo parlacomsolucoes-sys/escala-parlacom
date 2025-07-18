@@ -157,14 +157,22 @@ export class ScheduleService {
     return scheduleEntry;
   }
 
-  // PHASE 4: Weekend schedule generation
-  async generateWeekendSchedule(year: number, month: number): Promise<number> {
-    console.log(`[WeekendSchedule] Generating weekend schedule for ${month}/${year}`);
+  // PHASE 2: Idempotent weekend schedule generation
+  async generateWeekendSchedule(year: number, month: number, force: boolean = false): Promise<{
+    daysGenerated: number;
+    changedCount: number;
+    skippedHolidays: string[];
+    eligibleEmployees: number;
+    totalWeekendDaysProcessed: number;
+    employeesUsed: string[];
+  }> {
+    console.log(`[WEEKEND] Generating weekend schedule for ${month}/${year}, force=${force}`);
     
-    // Get all active employees with weekend rotation
+    // Get all active employees with weekend rotation, ordered by name for consistency
     const employeesSnapshot = await this.employeesCollection
       .where('isActive', '==', true)
       .where('weekendRotation', '==', true)
+      .orderBy('name')
       .get();
     
     const weekendEmployees: Employee[] = employeesSnapshot.docs.map(doc => ({
@@ -173,9 +181,18 @@ export class ScheduleService {
     })) as Employee[];
 
     if (weekendEmployees.length === 0) {
-      console.log(`[WeekendSchedule] No employees with weekend rotation found`);
-      return 0;
+      console.log(`[WEEKEND] No employees with weekend rotation found`);
+      return {
+        daysGenerated: 0,
+        changedCount: 0,
+        skippedHolidays: [],
+        eligibleEmployees: 0,
+        totalWeekendDaysProcessed: 0,
+        employeesUsed: []
+      };
     }
+
+    console.log(`[WEEKEND] Found ${weekendEmployees.length} eligible employees:`, weekendEmployees.map(e => e.name));
 
     // Get all holidays
     const holidaysSnapshot = await this.holidaysCollection.get();
@@ -184,24 +201,34 @@ export class ScheduleService {
       ...doc.data(),
     })) as Holiday[];
 
-    // Get days in month
+    // Get weekend days in month
     const lastDay = new Date(year, month, 0);
-    let daysGenerated = 0;
-    let employeeIndex = 0;
-
+    const weekendDates: Date[] = [];
+    
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month - 1, day);
+      const dayOfWeek = date.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
+        weekendDates.push(date);
+      }
+    }
+
+    console.log(`[WEEKEND] Found ${weekendDates.length} weekend days in ${month}/${year}`);
+
+    let daysGenerated = 0;
+    let changedCount = 0;
+    let employeeIndex = 0;
+    const skippedHolidays: string[] = [];
+    const employeesUsed: string[] = [];
+
+    for (const date of weekendDates) {
       const dateString = date.toISOString().split('T')[0];
       const dayOfWeek = date.getDay();
 
-      // Only process Saturday (6) and Sunday (0)
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        continue;
-      }
-
       // Check if it's a holiday
       if (isHoliday(date, holidays)) {
-        console.log(`[WeekendSchedule] Skipping holiday: ${dateString}`);
+        console.log(`[WEEKEND] Skipping holiday: ${dateString}`);
+        skippedHolidays.push(dateString);
         continue;
       }
 
@@ -209,23 +236,46 @@ export class ScheduleService {
       const employee = weekendEmployees[employeeIndex % weekendEmployees.length];
       employeeIndex++;
 
+      if (!employeesUsed.includes(employee.name)) {
+        employeesUsed.push(employee.name);
+      }
+
       // Create assignment
       const assignment: Assignment = {
         id: `${employee.id}-${dateString}`,
         employeeId: employee.id,
         employeeName: employee.name,
-        startTime: employee.defaultStartTime,
-        endTime: employee.defaultEndTime,
+        startTime: employee.customSchedule?.[dayOfWeek === 6 ? 'saturday' : 'sunday']?.startTime || employee.defaultStartTime,
+        endTime: employee.customSchedule?.[dayOfWeek === 6 ? 'saturday' : 'sunday']?.endTime || employee.defaultEndTime,
       };
 
-      // Get existing schedule entry or create new one
+      // Get existing schedule entry
       const scheduleRef = this.scheduleCollection.doc(dateString);
       const existingDoc = await scheduleRef.get();
       
+      let shouldUpdate = force;
+      let existingAssignments: Assignment[] = [];
+
       if (existingDoc.exists) {
         const existingData = existingDoc.data();
-        const existingAssignments = existingData?.assignments || [];
+        existingAssignments = existingData?.assignments || [];
         
+        // Check if this exact assignment already exists (idempotency check)
+        const existingWeekendAssignment = existingAssignments.find(
+          a => weekendEmployees.some(emp => emp.id === a.employeeId)
+        );
+
+        if (!existingWeekendAssignment) {
+          shouldUpdate = true; // No weekend assignment exists yet
+        } else if (existingWeekendAssignment.employeeId !== employee.id) {
+          shouldUpdate = true; // Different employee would be assigned
+        }
+        // If same employee already assigned, keep shouldUpdate = force
+      } else {
+        shouldUpdate = true; // No schedule exists for this day
+      }
+
+      if (shouldUpdate) {
         // Remove existing weekend rotation employees from this day
         const filteredAssignments = existingAssignments.filter(
           (a: Assignment) => !weekendEmployees.some(emp => emp.id === a.employeeId)
@@ -234,28 +284,43 @@ export class ScheduleService {
         // Add new assignment
         filteredAssignments.push(assignment);
         
-        await scheduleRef.update({
-          assignments: filteredAssignments,
-          updatedAt: new Date().toISOString()
-        });
+        if (existingDoc.exists) {
+          await scheduleRef.update({
+            assignments: filteredAssignments,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          // Create new schedule entry
+          const scheduleEntry = {
+            date: dateString,
+            assignments: filteredAssignments,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          
+          await scheduleRef.set(scheduleEntry);
+        }
+
+        console.log(`[WEEKEND] ✅ Assigned ${employee.name} to ${dateString} (${dayOfWeek === 0 ? 'Sunday' : 'Saturday'})`);
+        changedCount++;
       } else {
-        // Create new schedule entry
-        const scheduleEntry = {
-          date: dateString,
-          assignments: [assignment],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        await scheduleRef.set(scheduleEntry);
+        console.log(`[WEEKEND] ⚡ ${dateString} already has correct assignment (${employee.name})`);
       }
 
-      console.log(`[WeekendSchedule] Assigned ${employee.name} to ${dateString} (${dayOfWeek === 0 ? 'Sunday' : 'Saturday'})`);
       daysGenerated++;
     }
 
-    console.log(`[WeekendSchedule] ✅ Generated ${daysGenerated} weekend assignments`);
-    return daysGenerated;
+    const result = {
+      daysGenerated,
+      changedCount,
+      skippedHolidays,
+      eligibleEmployees: weekendEmployees.length,
+      totalWeekendDaysProcessed: weekendDates.length,
+      employeesUsed
+    };
+
+    console.log(`[WEEKEND] ✅ Complete:`, result);
+    return result;
   }
 }
 
