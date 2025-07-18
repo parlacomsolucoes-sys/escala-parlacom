@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import DayEditModal from "@/components/modals/DayEditModal";
 import type { ScheduleEntry, Holiday } from "@shared/schema";
 import { isWeekend, isHoliday } from "@shared/schema";
+import { formatDateKey, getCurrentDateKey } from "@shared/utils/date";
 
 export default function SchedulePage() {
   const { user } = useAuth();
@@ -112,7 +113,7 @@ export default function SchedulePage() {
     const currentDay = new Date(startDate);
     
     for (let i = 0; i < 42; i++) {
-      const dateString = currentDay.toISOString().split('T')[0];
+      const dateString = formatDateKey(currentDay);
       const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
       const isCurrentMonth = currentDay.getMonth() === month - 1;
       const isToday = currentDay.toDateString() === new Date().toDateString();
@@ -144,7 +145,7 @@ export default function SchedulePage() {
     const currentDay = new Date(startOfWeek);
     
     for (let i = 0; i < 7; i++) {
-      const dateString = currentDay.toISOString().split('T')[0];
+      const dateString = formatDateKey(currentDay);
       const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
       const isToday = currentDay.toDateString() === new Date().toDateString();
       const holiday = isHoliday(currentDay, holidays);
@@ -168,7 +169,23 @@ export default function SchedulePage() {
 
   // PHASE 3: Get single day data
   const getDayData = () => {
-    if (!selectedDay) return null;
+    if (!selectedDay) {
+      // Default to today if no day selected
+      const today = new Date();
+      const todayString = formatDateKey(today);
+      const scheduleEntry = scheduleEntries.find(entry => entry.date === todayString);
+      const holiday = isHoliday(today, holidays);
+      
+      return {
+        date: today,
+        dateString: todayString,
+        day: today.getDate(),
+        isToday: true,
+        isWeekend: isWeekend(today),
+        holiday,
+        assignments: scheduleEntry?.assignments || []
+      };
+    }
     
     const scheduleEntry = scheduleEntries.find(entry => entry.date === selectedDay.date);
     const dayDate = new Date(selectedDay.date);
@@ -326,6 +343,18 @@ export default function SchedulePage() {
               className="p-2"
             >
               <ChevronRight size={16} />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCurrentDate(new Date());
+                setViewMode("day");
+                setSelectedDay({ date: getCurrentDateKey(), assignments: [] });
+              }}
+              className="px-3"
+            >
+              Hoje
             </Button>
           </div>
 

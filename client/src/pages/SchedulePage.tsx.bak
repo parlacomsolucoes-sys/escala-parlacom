@@ -490,6 +490,7 @@ export default function SchedulePage() {
             </div>
           ))}
         </div>
+        </div>
       )}
 
       {/* PHASE 3: Week View */}

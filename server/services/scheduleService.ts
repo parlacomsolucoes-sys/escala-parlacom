@@ -1,6 +1,7 @@
 import { adminDb } from "../firebase-admin";
 import type { Employee, Holiday, ScheduleEntry, Assignment } from "@shared/schema";
 import { getWeekNumber, isWeekend, isHoliday, normalizeTime } from "@shared/schema";
+import { formatDateKey } from "@shared/utils/date";
 
 export class ScheduleService {
   private employeesCollection = adminDb.collection('employees');
@@ -32,7 +33,7 @@ export class ScheduleService {
 
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month - 1, day);
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = formatDateKey(date);
       const dayOfWeek = date.getDay();
       const weekNumber = getWeekNumber(date);
       const isEvenWeek = weekNumber % 2 === 0;
@@ -168,17 +169,19 @@ export class ScheduleService {
   }> {
     console.log(`[WEEKEND] Generating weekend schedule for ${month}/${year}, force=${force}`);
     
-    // Get all active employees with weekend rotation, ordered by name for consistency
+    // Get all active employees with weekend rotation
     const employeesSnapshot = await this.employeesCollection
       .where('isActive', '==', true)
       .where('weekendRotation', '==', true)
-      .orderBy('name')
       .get();
     
     const weekendEmployees: Employee[] = employeesSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     })) as Employee[];
+
+    // Sort by name for consistency
+    weekendEmployees.sort((a, b) => a.name.localeCompare(b.name));
 
     if (weekendEmployees.length === 0) {
       console.log(`[WEEKEND] No employees with weekend rotation found`);
@@ -222,7 +225,7 @@ export class ScheduleService {
     const employeesUsed: string[] = [];
 
     for (const date of weekendDates) {
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = formatDateKey(date);
       const dayOfWeek = date.getDay();
 
       // Check if it's a holiday

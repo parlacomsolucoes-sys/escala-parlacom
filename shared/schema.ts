@@ -27,18 +27,33 @@ export interface Employee extends InsertEmployee {
   updatedAt: string;
 }
 
-// Holiday schema - now supports recurrent holidays (MM-DD format)
+// Holiday schema - supports both legacy date format and new month/day format
 const baseHolidaySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  date: z.string().regex(/^(\d{4}-)?(\d{2}-\d{2})$/, "Data deve estar no formato MM-DD ou YYYY-MM-DD"),
+  // Legacy field for backward compatibility
+  date: z.string().optional(),
+  // New fields for recurrent holidays
+  month: z.number().min(1).max(12).optional(),
+  day: z.number().min(1).max(31).optional(),
   description: z.string().optional()
 });
 
 export const insertHolidaySchema = baseHolidaySchema.transform((data) => {
-  // Normalize date to MM-DD format (remove year if present)
-  const dateMatch = data.date.match(/^(\d{4}-)?(\d{2}-\d{2})$/);
-  if (dateMatch) {
-    data.date = dateMatch[2]; // Keep only MM-DD part
+  // Handle legacy date format (MM-DD or YYYY-MM-DD)
+  if (data.date && !data.month && !data.day) {
+    const dateMatch = data.date.match(/^(\d{4}-)?(\d{2})-(\d{2})$/);
+    if (dateMatch) {
+      data.month = parseInt(dateMatch[2]);
+      data.day = parseInt(dateMatch[3]);
+      // Keep the date field for backward compatibility
+      data.date = dateMatch[2] + "-" + dateMatch[3];
+    }
+  }
+  // If month and day are provided, generate the MM-DD date string
+  else if (data.month && data.day) {
+    const monthStr = String(data.month).padStart(2, '0');
+    const dayStr = String(data.day).padStart(2, '0');
+    data.date = `${monthStr}-${dayStr}`;
   }
   return data;
 });
@@ -109,18 +124,27 @@ export function isWeekend(date: Date): boolean {
 
 // Utility function to check if date is holiday (supports recurrent MM-DD format)
 export function isHoliday(date: Date, holidays: Holiday[]): Holiday | undefined {
-  const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
-  const monthDay = dateString.substring(5); // MM-DD
+  const targetMonth = date.getMonth() + 1; // 1-12
+  const targetDay = date.getDate(); // 1-31
   
   return holidays.find(holiday => {
-    // Support both old format (YYYY-MM-DD) and new format (MM-DD)
-    if (holiday.date.includes('-') && holiday.date.length === 5) {
-      // New format: MM-DD
-      return holiday.date === monthDay;
-    } else if (holiday.date === dateString) {
-      // Old format: YYYY-MM-DD
-      return true;
+    // Check if holiday has month and day fields (new format)
+    if (holiday.month && holiday.day) {
+      return holiday.month === targetMonth && holiday.day === targetDay;
     }
+    
+    // Fallback to legacy date format
+    if (holiday.date) {
+      // Handle MM-DD format
+      if (holiday.date.includes('-') && holiday.date.length === 5) {
+        const [month, day] = holiday.date.split('-').map(Number);
+        return month === targetMonth && day === targetDay;
+      }
+      // Handle YYYY-MM-DD format (full date match)
+      const dateString = date.toISOString().split('T')[0];
+      return holiday.date === dateString;
+    }
+    
     return false;
   });
 }

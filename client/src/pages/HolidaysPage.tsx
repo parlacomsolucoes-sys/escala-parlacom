@@ -44,17 +44,58 @@ export default function HolidaysPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('pt-BR', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+  const formatDate = (holiday: Holiday) => {
+    // Handle new month/day format
+    if (holiday.month && holiday.day) {
+      return `${String(holiday.day).padStart(2, '0')}/${String(holiday.month).padStart(2, '0')}`;
+    }
+    
+    // Handle legacy MM-DD format
+    if (holiday.date && holiday.date.includes('-') && holiday.date.length === 5) {
+      const [month, day] = holiday.date.split('-');
+      return `${day}/${month}`;
+    }
+    
+    // Handle legacy YYYY-MM-DD format
+    if (holiday.date) {
+      try {
+        const date = new Date(holiday.date + 'T00:00:00');
+        if (!isNaN(date.getTime())) {
+          return date.toLocaleDateString('pt-BR', { 
+            day: '2-digit', 
+            month: '2-digit' 
+          });
+        }
+      } catch (e) {
+        console.warn('Error formatting date:', holiday.date);
+      }
+    }
+    
+    return 'Data inválida';
   };
 
   // Sort holidays by date
-  const sortedHolidays = [...holidays].sort((a, b) => a.date.localeCompare(b.date));
+  const sortedHolidays = [...holidays].sort((a, b) => {
+    // Get month and day for comparison
+    const getMonthDay = (holiday: Holiday) => {
+      if (holiday.month && holiday.day) {
+        return { month: holiday.month, day: holiday.day };
+      }
+      if (holiday.date && holiday.date.includes('-') && holiday.date.length === 5) {
+        const [month, day] = holiday.date.split('-').map(Number);
+        return { month, day };
+      }
+      return { month: 0, day: 0 };
+    };
+    
+    const aDate = getMonthDay(a);
+    const bDate = getMonthDay(b);
+    
+    if (aDate.month !== bDate.month) {
+      return aDate.month - bDate.month;
+    }
+    return aDate.day - bDate.day;
+  });
 
   if (isLoading) {
     return (
@@ -133,7 +174,7 @@ export default function HolidaysPage() {
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">{holiday.name}</h3>
-                      <p className="text-sm text-gray-600">{formatDate(holiday.date)}</p>
+                      <p className="text-sm text-gray-600">{formatDate(holiday)}</p>
                       {holiday.description && (
                         <p className="text-sm text-gray-500 mt-1">{holiday.description}</p>
                       )}

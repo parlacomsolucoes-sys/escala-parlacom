@@ -1,0 +1,173 @@
+**PROMPT (INSTRUÇÕES DETALHADAS – AJUSTES ADICIONAIS)**
+Aplique **somente** as correções descritas abaixo. Siga este fluxo: (1) localizar causa, (2) criar backup do arquivo alterado (`.bak`), (3) implementar, (4) testar manualmente e registrar resultado em um mini‑relatório final. Não adicionar bibliotecas novas.
+
+---
+
+## 1. BUG: Clique no dia abre o dia anterior
+
+**Sintoma:** Clicar no dia *D* na grade mensal abre modal ou view do dia *D‑1*.
+**Provável causa:** Uso de fuso horário / conversão `toISOString()` cortando horas e voltando o dia pela diferença de timezone (UTC vs local) ou criação de `new Date(yyyy, mm, dd)` vs manipulação posterior.
+
+**Correções a executar:**
+
+1. Localizar em `SchedulePage` (ou util correlata) onde se monta `dateString = currentDay.toISOString().split('T')[0]`.
+2. Substituir geração de `dateString` por função **timezone-safe**:
+
+   * Criar helper `formatDateLocal(date: Date): string` que retorna `YYYY-MM-DD` usando `date.getFullYear()`, `date.getMonth()+1`, `date.getDate()` (sem usar `toISOString()`).
+3. Aplicar este helper em:
+
+   * Construção de cada dia do calendário.
+   * Qualquer ponto onde associa assignments por chave de data.
+4. Verificar se em alguma parte é criado `new Date(dateString + 'T00:00:00')`; manter ou ajustar, mas sempre tratar como local.
+5. Retestar clicando em vários dias (1, 4, 15, último dia do mês) e garantir abertura correta.
+
+---
+
+## 2. ERRO 500 NA ROTA `/api/schedule/generate-weekends`
+
+**Objetivo:** Fazer a geração de escala de fim de semana funcionar.
+
+**Ações:**
+
+1. Abrir rota implementada (ex: em `routes.ts`). Caso não exista, criar rota nova isolada `POST /api/schedule/generate-weekends`.
+2. Incluir logs estruturados antes do processamento: quantidade de funcionários (ativos + `weekendRotation=true`), mês/ano, lista de sábados e domingos alvo.
+3. Validar body: `{ year?: number, month?: number }`. Se ausentes, usar mês/ano atuais (local).
+4. Buscar funcionários rotativos. Se array vazio → retornar 422 JSON `{ message: "No weekend rotation employees", code: "NO_ROTATION_EMPLOYEES" }`.
+5. Montar lista de todos os dias do mês e filtrar `day.getDay() === 6 || day.getDay() === 0`.
+6. Para cada fim de semana:
+
+   * Montar chave `YYYY-MM-DD` usando helper local (ver item 1).
+   * Buscar/ler documento `schedule`.
+   * Remover assignments existentes desses funcionários rotativos (para idempotência).
+   * Calcular índice round‑robin: manter contador local que avança a cada dia de fim de semana processado (Saturday e Sunday contam separadamente).
+   * Selecionar funcionário = `employees[index % employees.length]`.
+   * Inserir assignment com horário padrão do funcionário (normalizar).
+7. Salvar (upsert) cada dia. Evitar commits individuais lentos usando batch se disponível, mas priorizar correção funcional.
+8. Se ocorrer erro, capturar stack no log e retornar 500 com JSON `{ message: "Failed to generate weekend schedule", stage, hint? }`.
+9. Testes:
+
+   * Sem funcionários rotativos.
+   * Com 1 funcionário.
+   * Com 2+ funcionários (verificar alternância).
+10. Retornar 200 payload: `{ processedDays, employeesCount, assignmentsCreated }`.
+
+---
+
+## 3. FERIADOS: “Invalid Date” NA LISTAGEM
+
+**Problema:** Na página de feriados aparece “Invalid Date” para item `[Feriado Nacional] Independência do Brasil`. Porém no calendário marca certo.
+**Motivo provável:** Modelo salvo inclui ano (ex: `2025-09-07`) e ao tentar exibir como recorrente, lógica converte para `new Date(mês-dia sem ano)` ou feriado salvo sem formatação adequada.
+
+**Requisitos de ajuste:**
+
+1. Alterar *persistência* de feriado para armazenar **apenas**:
+
+   * `month` (1–12)
+   * `day` (1–31)
+   * `name`
+   * `type` (opcional, se já existe)
+   * `createdAt`, `updatedAt`
+     (Remover `date` rígido anual do Firestore para novos cadastros).
+2. **Compatibilidade retroativa:** Se documento antigo possuir campo `date` (YYYY-MM-DD):
+
+   * Ao carregar, fazer parse e derivar `month`, `day`.
+3. Adaptar funções:
+
+   * `isHoliday(date, holidays)` deve comparar `date.getMonth()+1 === holiday.month` e `date.getDate() === holiday.day`.
+4. Página de feriados:
+
+   * Exibir data formatada `DD/MM` (sem ano).
+   * Ordenar por (month, day).
+5. Ajustar modal de criação/edição:
+
+   * Input de data → usar `<input type="date">` ainda pode fornecer ano; ao salvar extrair month/day e descartar ano. OU substituir por 2 selects (dia/mês). Escolha uma abordagem e documentar.
+6. Migrar rendering do calendário para usar a nova estrutura (já marcado – só conferir).
+7. Testar feriados perto da virada do ano (ex: 01/01 e 25/12).
+
+---
+
+## 4. VIEW “DIA” DEVE ABRIR HOJE POR PADRÃO
+
+**Ações:**
+
+1. Ao entrar em `SchedulePage`, se `viewMode === "day"` inicializar `selectedDay` com a data de hoje (helper local date format).
+2. Se fluxo atual só muda view ao clicar, adicionar botão “Hoje” que:
+
+   * Atualiza `currentDate = new Date()`
+   * Seta `viewMode = "day"`
+   * Atualiza `selectedDay`.
+3. Garantir que modal ou painel exiba assignments do dia atual mesmo se monthly schedule ainda não existir (mostrar mensagem “Sem escala gerada / Sem assignments”).
+
+---
+
+## 5. HORÁRIOS DIFERENCIADOS POR DIA (VERIFICAR UI DE FUNCIONÁRIO)
+
+> (Se já foi parcialmente implementado, apenas garantir persistência correta.)
+
+**Ações resumidas (caso não esteja pronto):**
+
+1. Ao criar funcionário, permitir definir horários específicos por dia marcado:
+
+   * Estrutura `customSchedule: { monday: { startTime, endTime }, ... }`.
+2. Se vazio para um dia marcado, usar `defaultStartTime` / `defaultEndTime`.
+3. Validar formato HH\:MM antes de salvar.
+
+*(Se já implementado, somente validar interação com rotação de fim de semana usa horários desse dia.)*
+
+---
+
+## 6. CONSISTÊNCIA DAS DATAS NA ESCALA
+
+**Objetivo:** Todos os pontos que criam string de data devem usar o helper central (ver item 1).
+
+**Ações:**
+
+1. Criar `utils/date.ts` (ou usar já existente) com:
+
+   * `formatDateKey(date: Date): string` → `YYYY-MM-DD` sem UTC shift.
+2. Substituir todas as ocorrências de `toISOString().split('T')[0]`.
+3. Retestar clique e geração de fim de semana.
+
+---
+
+## 7. TESTES MANUAIS (LISTAR RESULTADO AO FINAL)
+
+| Teste | Ação                                                               | Esperado                           |
+| ----- | ------------------------------------------------------------------ | ---------------------------------- |
+| 1     | Clicar em diversos dias (1, 4, 10, 28)                             | Abre o mesmo dia                   |
+| 2     | Gerar fins de semana sem rotativos                                 | 422                                |
+| 3     | Adicionar 2 rotativos e gerar                                      | Alternância Sáb/Dom                |
+| 4     | Regerar imediatamente                                              | Idempotente (sem duplicar)         |
+| 5     | Ver feriados lista                                                 | Datas em DD/MM, sem “Invalid Date” |
+| 6     | Feriado recorrente aparece no calendário ano seguinte              | Sim                                |
+| 7     | View “Dia” inicial                                                 | Mostra hoje                        |
+| 8     | Escala fim de semana pula feriado (se feriado cair sábado/domingo) | Sem assignment nesse dia           |
+| 9     | Horário custom por dia refletido no assignment                     | Horários corretos                  |
+
+Registrar tabela preenchida.
+
+---
+
+## 8. RELATÓRIO FINAL
+
+Após concluir, gerar resumo:
+
+* Arquivos modificados.
+* Causa raiz do bug de clique (ex: uso de toISOString UTC).
+* Causa raiz do 500 (ex: rota ausente ou erro de lógica).
+* Mudanças estruturais (feriados recorrentes).
+* Pendências futuras (ex: persistir estado de round‑robin global).
+
+---
+
+## 9. RESTRIÇÕES
+
+* Não adicionar libs externas.
+* Não remover funcionalidades existentes.
+* Não expor credenciais nos logs.
+* Manter compatibilidade com dados antigos (feriados com campo `date`).
+
+---
+
+**EXECUTAR EXATAMENTE ESTE PLANO E ENTREGAR RELATÓRIO FINAL AO TÉRMINO.**
+FIM DO PROMPT.
