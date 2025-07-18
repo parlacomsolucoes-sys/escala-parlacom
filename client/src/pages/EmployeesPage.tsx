@@ -187,6 +187,11 @@ export default function EmployeesPage() {
                               Revezamento
                             </Badge>
                           )}
+                          {employee.customSchedule && Object.keys(employee.customSchedule).length > 0 && (
+                            <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 bg-blue-50">
+                              Horários Personalizados
+                            </Badge>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">

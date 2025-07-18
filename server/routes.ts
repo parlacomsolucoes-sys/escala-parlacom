@@ -15,21 +15,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(employees);
     } catch (error) {
       console.error("Get employees error:", error);
-      res.status(500).json({ message: "Failed to get employees" });
+      res.status(500).json({ 
+        message: "Failed to get employees",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
     }
   });
 
   app.post("/api/employees", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
+      console.log("[POST /api/employees] Recebido body:", JSON.stringify(req.body, null, 2));
+      console.log("[POST /api/employees] Usuario autenticado:", req.user);
+      
       const employeeData = insertEmployeeSchema.parse(req.body);
+      console.log("[POST /api/employees] Dados validados:", JSON.stringify(employeeData, null, 2));
+      
+      console.log("[Firestore] Tentando criar employee...");
       const employee = await storage.createEmployee(employeeData);
+      console.log("[POST /api/employees] Employee criado com sucesso:", employee.id);
+      
       res.status(201).json(employee);
     } catch (error) {
       if (error instanceof z.ZodError) {
+        console.log("[POST /api/employees] Erro de validação Zod:", error.errors);
         res.status(400).json({ message: "Validation error", errors: error.errors });
       } else {
-        console.error("Create employee error:", error);
-        res.status(500).json({ message: "Failed to create employee" });
+        console.error("[POST /api/employees] Erro detalhado:", {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          stack: error.stack,
+          name: error.constructor.name
+        });
+        res.status(500).json({ 
+          message: "Failed to create employee",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
       }
     }
   });
@@ -45,7 +68,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Validation error", errors: error.errors });
       } else {
         console.error("Update employee error:", error);
-        res.status(500).json({ message: "Failed to update employee" });
+        res.status(500).json({ 
+          message: "Failed to update employee",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
       }
     }
   });
@@ -57,7 +84,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       console.error("Delete employee error:", error);
-      res.status(500).json({ message: "Failed to delete employee" });
+      res.status(500).json({ 
+        message: "Failed to delete employee",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
     }
   });
 
@@ -68,7 +99,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(holidays);
     } catch (error) {
       console.error("Get holidays error:", error);
-      res.status(500).json({ message: "Failed to get holidays" });
+      res.status(500).json({ 
+        message: "Failed to get holidays",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
     }
   });
 
@@ -82,7 +117,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Validation error", errors: error.errors });
       } else {
         console.error("Create holiday error:", error);
-        res.status(500).json({ message: "Failed to create holiday" });
+        res.status(500).json({ 
+          message: "Failed to create holiday",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
       }
     }
   });
@@ -94,7 +133,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       console.error("Delete holiday error:", error);
-      res.status(500).json({ message: "Failed to delete holiday" });
+      res.status(500).json({ 
+        message: "Failed to delete holiday",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
     }
   });
 
@@ -112,7 +155,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(schedule);
     } catch (error) {
       console.error("Get schedule error:", error);
-      res.status(500).json({ message: "Failed to get schedule" });
+      res.status(500).json({ 
+        message: "Failed to get schedule",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
     }
   });
 
@@ -126,7 +173,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Validation error", errors: error.errors });
       } else {
         console.error("Generate schedule error:", error);
-        res.status(500).json({ message: "Failed to generate schedule" });
+        res.status(500).json({ 
+          message: "Failed to generate schedule",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
       }
     }
   });

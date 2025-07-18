@@ -26,7 +26,11 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
     next();
   } catch (error) {
     console.error('Auth error:', error);
-    res.status(401).json({ message: 'Invalid token' });
+    res.status(401).json({ 
+      message: 'Invalid token',
+      detail: error.message,
+      code: error.code || "AUTH_ERROR"
+    });
   }
 }
 

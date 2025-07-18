@@ -1,0 +1,117 @@
+**PROMPT PARA O AGENTE DO REPLIT**
+(cole exatamente abaixo para que o Replit AI debug e implemente)
+
+---
+
+Quero que você **analise, depure e ajuste** o projeto atual (monorepo com `server/`, `client/`, `shared/`) com foco em:
+
+## 1. CONTEXTO RÁPIDO
+
+* Frontend: React + Vite (pasta `client/`), usa Firebase Web SDK (Auth).
+* Backend: Express + Firebase Admin SDK (Firestore) (pasta `server/`).
+* Schemas em `shared/schema.ts` (Zod).
+* CRUD de Employees / Holidays e geração de escala (`/api/employees`, `/api/holidays`, `/api/schedule/...`).
+* Autenticação: Front gera ID Token do Firebase Auth; backend valida via Admin SDK usando `requireAuth`.
+* Variáveis de ambiente já configuradas (FIREBASE\_\* e VITE\_FIREBASE\_\*).
+* No Replit já consigo logar; **erro ao criar funcionário (HTTP 500)**.
+* Quero logs claros para identificar a causa e corrigir.
+* **Novo requisito:** ao criar/editar funcionário devo poder definir horários (início/fim) individualizados por cada dia selecionado (customSchedule), não apenas um horário padrão único.
+
+## 2. TAREFAS (EXECUTE EM ORDEM)
+
+### (A) DEPURAÇÃO DO ERRO 500 EM `/api/employees`
+
+1. Adicionar logs detalhados na rota POST `/api/employees` (antes e depois da validação Zod) e no método `createEmployee` de `storage.ts`.
+2. Confirmar se o token chega (header `Authorization: Bearer ...`). Se não estiver chegando, ajustar origem do fetch no frontend (já há proxy ou base URL?).
+3. Verificar se a inicialização do Firebase Admin (`firebase-admin.ts`) está usando corretamente:
+
+   * `private_key = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")`
+   * Checar se não há espaços extras ou aspas duplicadas.
+4. Adicionar um script de teste em `server/testFirestore.ts` que apenas escreva/ leia um documento para validar credenciais. Rodar (`npx tsx server/testFirestore.ts`) e confirmar sucesso.
+5. Se o erro vier de Firestore (ex: “Missing or insufficient permissions” ou “Could not load default credentials”), imprimir erro completo na resposta JSON (campo `detail`) para facilitar diagnóstico.
+6. Devolver correção para permitir criação normal de funcionário (status 201).
+
+### (B) MELHORAR A RESPOSTA DE ERRO
+
+* Todas as rotas que retornam 500 devem incluir JSON com: `{ message, detail, code }` (onde existir).
+* Garantir que `res.status(500)` nunca devolva HTML nem linha cortada.
+
+### (C) IMPLEMENTAR HORÁRIOS POR DIA (customSchedule)
+
+**Objetivo**: Ao criar/editar funcionário o usuário pode:
+
+* Selecionar os dias trabalhados (checkbox como já existe).
+* Para cada dia marcado, definir `startTime` e `endTime` (ex: Seg 08:00–17:00, Ter 10:00–19:00, etc).
+* Se o usuário não preencher campos de um dia marcado, usar fallback dos campos “Horário Padrão”.
+* Persistir isso em `customSchedule` no Firestore conforme schema existente (`customSchedule: { monday: { startTime, endTime }, ... }`).
+
+**Alterações necessárias**:
+
+1. **Modal EmployeeModal.tsx**
+
+   * Adicionar UI dinâmica abaixo dos checkboxes: para cada dia selecionado renderizar dois inputs (Início / Fim) pré-preenchidos com (defaultStartTime/defaultEndTime) se ainda não houver custom.
+   * Atualizar state para manter `customSchedule`.
+   * Ao salvar:
+
+     * Montar objeto `customSchedule` apenas com dias marcados **onde** os horários diferem do padrão **ou** mesmo se iguais (simplificar lógica – pode salvar sempre).
+     * Validar formato HH\:MM (regex já existe em schema).
+2. **Edição**:
+
+   * Quando abrir para editar, carregar `employee.customSchedule` e preencher inputs correspondentes.
+3. **Backend**:
+
+   * Schema já suporta `customSchedule`. Verificar se nada quebra ao salvar (se necessário remover campos `undefined`).
+4. **Geração de Escala (scheduleService.ts)**:
+
+   * Já considera `employee.customSchedule[dayName]`; confirmar que nenhum dia fica “undefined” após mudança.
+5. **Exibição na tabela de funcionários**:
+
+   * Opcional (se possível): tooltip ou ícone indicando que aquele funcionário tem horários personalizados (ex: se `customSchedule` possui ao menos 1 dia). Se implementar: adicionar uma pequena badge “Custom” ao lado do nome.
+
+### (D) LIMPEZA / QUALIDADE
+
+* Confirmar que proxy do Vite não atrapalha quando rodando junto no Replit (talvez usar fetch relativo `/api/...` já suficiente).
+* Garantir que em produção (build) o frontend consome `/api` no mesmo host (atual deve funcionar).
+* Remover imports não usados que causem warnings massivos.
+
+### (E) CHECKLIST DE TESTE AUTOMANUAL (executar depois)
+
+1. Login → OK (token gerado).
+2. GET `/api/employees` sem estar logado → 200 (lista) (regras Firestore permitem read público).
+3. POST `/api/employees` sem token → 401.
+4. POST válido → 201 (objeto contém `customSchedule` se enviado).
+5. PATCH modificando só um horário de um dia → retorno atualizado.
+6. Geração de escala mensal: um dia (ex: terça) usa horário custom; outro (quarta) usa padrão.
+7. Remoção de funcionário → 204.
+8. Requisição com dados inválidos (horário “25:99”) → 400 com `errors`.
+
+### (F) LOGS ESPERADOS APÓS CORREÇÃO (EXEMPLO)
+
+```
+[POST /api/employees] body: { name: "João", workDays:["monday","tuesday"], defaultStartTime:"08:00", defaultEndTime:"17:00", customSchedule:{ monday:{startTime:"08:30",endTime:"17:30"} } }
+[POST /api/employees] user: { uid:"...", email:"admin@..." }
+[Firestore] Tentando adicionar employee: { name:"João", workDays:[...], weekendRotation:false }
+[POST /api/employees] criado: abc123
+```
+
+## 3. NÃO REMOVER
+
+* A estrutura atual de schemas em `shared/schema.ts`.
+* A lógica existente de geração de escala, apenas ajustar se necessário para custom schedule.
+
+## 4. ENTREGÁVEIS
+
+* Arquivos modificados listados com diffs ou o conteúdo final.
+* Confirmação textual dos testes do checklist.
+* Caso encontre erro estrutural diferente do previsto, explicar causa e solução adotada.
+
+## 5. PRIORIDADE
+
+1. Fazer o CREATE funcionar (eliminar 500).
+2. Implementar customSchedule por dia na criação/edição.
+3. Melhorar respostas de erro.
+4. Badge “Custom” (bônus).
+
+---
+
+**Execute agora seguindo as etapas acima e me retorne os logs + diffs das alterações.**

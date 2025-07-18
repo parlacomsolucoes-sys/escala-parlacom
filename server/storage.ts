@@ -48,6 +48,8 @@ export class FirestoreStorage implements IStorage {
   }
 
   async createEmployee(employeeData: InsertEmployee): Promise<Employee> {
+    console.log("[FirestoreStorage] Dados recebidos para criação:", JSON.stringify(employeeData, null, 2));
+    
     const now = new Date().toISOString();
     const employee: Omit<Employee, "id"> = {
       ...employeeData,
@@ -55,8 +57,22 @@ export class FirestoreStorage implements IStorage {
       updatedAt: now,
     };
 
-    const docRef = await this.employeesCollection.add(employee);
-    return { id: docRef.id, ...employee };
+    console.log("[FirestoreStorage] Objeto final para Firestore:", JSON.stringify(employee, null, 2));
+    
+    try {
+      console.log("[FirestoreStorage] Enviando para collection 'employees'...");
+      const docRef = await this.employeesCollection.add(employee);
+      console.log("[FirestoreStorage] ✅ Employee criado com ID:", docRef.id);
+      return { id: docRef.id, ...employee };
+    } catch (error) {
+      console.error("[FirestoreStorage] ❌ Erro ao criar employee:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        stack: error.stack
+      });
+      throw error;
+    }
   }
 
   async updateEmployee(

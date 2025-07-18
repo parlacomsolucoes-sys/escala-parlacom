@@ -8,6 +8,59 @@ ScheduleMaster is a full-stack employee scheduling management system built with 
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes
+
+### July 18, 2025 - Major Bug Fixes & Custom Schedule Implementation
+
+✅ **Fixed Critical Firebase Connection Issue**
+- Resolved Firebase private key decoding error (DECODER routines::unsupported)
+- Enhanced private key handling with proper newline and quote processing
+- Added comprehensive Firebase connection testing
+
+✅ **Enhanced Error Handling Throughout Application**
+- Added detailed error logging in all API routes
+- Improved error responses with `message`, `detail`, and `code` fields
+- Enhanced authentication middleware error handling
+- Added comprehensive logging in storage operations
+
+✅ **Implemented Custom Schedule Functionality**
+- Added custom schedule UI in EmployeeModal with per-day time inputs
+- Enhanced schema validation for custom schedule objects
+- Added visual "Horários Personalizados" badge in employee list
+- Fully functional custom schedule creation, editing, and deletion
+
+✅ **Application Debugging & Testing**
+- Created comprehensive test suite for employee API operations
+- Added detailed logging for all CRUD operations
+- Verified end-to-end functionality from frontend to database
+- All tests passing successfully
+
+### Technical Improvements Made
+
+1. **Firebase Configuration** (server/firebase-admin.ts)
+   - Fixed private key processing with proper escape handling
+   - Added validation for PEM format
+   - Enhanced initialization logging
+
+2. **API Routes** (server/routes.ts)
+   - Added comprehensive request/response logging
+   - Enhanced error handling with detailed error information
+   - Improved validation error responses
+
+3. **Storage Operations** (server/storage.ts)
+   - Added detailed logging for all database operations
+   - Enhanced error handling and reporting
+
+4. **Frontend Custom Schedule** (client/src/components/modals/EmployeeModal.tsx)
+   - Added dynamic custom schedule inputs for each work day
+   - Proper state management for custom schedules
+   - Clear UI with placeholders showing default times
+   - Remove custom schedule functionality
+
+5. **Employee List Enhancement** (client/src/pages/EmployeesPage.tsx)
+   - Added "Horários Personalizados" badge for employees with custom schedules
+   - Enhanced visual indication of employee special configurations
+
 ## System Architecture
 
 The application follows a monorepo structure with three main directories:

@@ -37,6 +37,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
     defaultEndTime: "18:00",
     isActive: true,
     weekendRotation: false,
+    customSchedule: {},
   });
 
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
         defaultEndTime: "18:00",
         isActive: true,
         weekendRotation: false,
+        customSchedule: {},
       });
     }
   }, [employee, isOpen]);
@@ -92,11 +94,35 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
   };
 
   const handleWorkDayChange = (day: typeof WEEKDAYS[number]["value"], checked: boolean) => {
+    setFormData(prev => {
+      const newWorkDays = checked 
+        ? [...prev.workDays, day]
+        : prev.workDays.filter(d => d !== day);
+      
+      // Remove custom schedule for unchecked days
+      const newCustomSchedule = { ...prev.customSchedule };
+      if (!checked && newCustomSchedule[day]) {
+        delete newCustomSchedule[day];
+      }
+      
+      return {
+        ...prev,
+        workDays: newWorkDays,
+        customSchedule: newCustomSchedule
+      };
+    });
+  };
+
+  const handleCustomScheduleChange = (day: string, field: 'startTime' | 'endTime', value: string) => {
     setFormData(prev => ({
       ...prev,
-      workDays: checked 
-        ? [...prev.workDays, day]
-        : prev.workDays.filter(d => d !== day)
+      customSchedule: {
+        ...prev.customSchedule,
+        [day]: {
+          ...prev.customSchedule?.[day],
+          [field]: value
+        }
+      }
     }));
   };
 
@@ -208,6 +234,74 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
                 </div>
               </div>
             </div>
+            
+            {/* Custom Schedule */}
+            {formData.workDays.length > 0 && (
+              <div>
+                <Label className="block text-sm font-medium text-gray-700 mb-3">
+                  Horários Personalizados por Dia
+                </Label>
+                <p className="text-xs text-gray-600 mb-4">
+                  Defina horários específicos para cada dia. Se não preenchido, será usado o horário padrão.
+                </p>
+                <div className="space-y-3">
+                  {formData.workDays.map((day) => {
+                    const dayInfo = WEEKDAYS.find(w => w.value === day);
+                    const customTime = formData.customSchedule?.[day];
+                    
+                    return (
+                      <div key={day} className="flex items-center space-x-4 p-3 border border-gray-200 rounded-lg">
+                        <div className="w-12 text-sm font-medium text-gray-700">
+                          {dayInfo?.label}
+                        </div>
+                        <div className="flex-1 grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="block text-xs text-gray-600 mb-1">Início</Label>
+                            <Input
+                              type="text"
+                              placeholder={formData.defaultStartTime}
+                              value={customTime?.startTime || ''}
+                              onChange={(e) => handleCustomScheduleChange(day, 'startTime', e.target.value)}
+                              className="text-sm"
+                            />
+                          </div>
+                          <div>
+                            <Label className="block text-xs text-gray-600 mb-1">Fim</Label>
+                            <Input
+                              type="text"
+                              placeholder={formData.defaultEndTime}
+                              value={customTime?.endTime || ''}
+                              onChange={(e) => handleCustomScheduleChange(day, 'endTime', e.target.value)}
+                              className="text-sm"
+                            />
+                          </div>
+                        </div>
+                        {customTime?.startTime || customTime?.endTime ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setFormData(prev => {
+                                const newCustomSchedule = { ...prev.customSchedule };
+                                delete newCustomSchedule[day];
+                                return {
+                                  ...prev,
+                                  customSchedule: newCustomSchedule
+                                };
+                              });
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <X size={16} />
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             
             {/* Weekend Rotation */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
