@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getCurrentUserToken } from "@/lib/auth";
-import type { Employee, Holiday, ScheduleEntry, InsertEmployee, InsertHoliday, InsertAssignment } from "@shared/schema";
+import type {
+  Employee,
+  Holiday,
+  ScheduleEntry,
+  InsertEmployee,
+  InsertHoliday,
+  InsertAssignment,
+} from "@shared/schema";
 
 // Employees
 export function useEmployees() {
@@ -12,24 +19,26 @@ export function useEmployees() {
 
 export function useCreateEmployee() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (data: InsertEmployee) => {
       const token = await getCurrentUserToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch("/api/employees", {
         method: "POST",
         headers,
         body: JSON.stringify(data),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -40,24 +49,29 @@ export function useCreateEmployee() {
 
 export function useUpdateEmployee() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async ({ id, ...data }: { id: string } & Partial<InsertEmployee>) => {
+    mutationFn: async ({
+      id,
+      ...data
+    }: { id: string } & Partial<InsertEmployee>) => {
       const token = await getCurrentUserToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch(`/api/employees/${id}`, {
         method: "PATCH",
         headers,
         body: JSON.stringify(data),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -68,23 +82,27 @@ export function useUpdateEmployee() {
 
 export function useDeleteEmployee() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (id: string) => {
       const token = await getCurrentUserToken();
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch(`/api/employees/${id}`, {
         method: "DELETE",
         headers,
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
+      // ✅ Firestore API devolve 204 – não há corpo para converter
+      if (response.status === 204) return null;
+
+      // Se algum dia mudarmos para 200+json, ainda funciona
       return response.json();
     },
     onSuccess: () => {
@@ -102,24 +120,26 @@ export function useHolidays() {
 
 export function useCreateHoliday() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (data: InsertHoliday) => {
       const token = await getCurrentUserToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch("/api/holidays", {
         method: "POST",
         headers,
         body: JSON.stringify(data),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -130,23 +150,23 @@ export function useCreateHoliday() {
 
 export function useDeleteHoliday() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (id: string) => {
       const token = await getCurrentUserToken();
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch(`/api/holidays/${id}`, {
         method: "DELETE",
         headers,
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -172,57 +192,71 @@ export function useSchedule(year: number, month: number) {
 
 export function useGenerateMonthlySchedule() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async ({ year, month }: { year: number; month: number }) => {
       const token = await getCurrentUserToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch("/api/schedule/generate", {
         method: "POST",
         headers,
         body: JSON.stringify({ year, month }),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/schedule", variables.year, variables.month] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/schedule", variables.year, variables.month],
+      });
     },
   });
 }
 
 export function useUpdateDaySchedule() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async ({ date, assignments }: { date: string; assignments: InsertAssignment[] }) => {
+    mutationFn: async ({
+      date,
+      assignments,
+    }: {
+      date: string;
+      assignments: InsertAssignment[];
+    }) => {
       const token = await getCurrentUserToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (token) headers.Authorization = `Bearer ${token}`;
-      
+
       const response = await fetch(`/api/schedule/day/${date}`, {
         method: "PATCH",
         headers,
         body: JSON.stringify({ assignments }),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`${response.status}: ${errorText}`);
       }
-      
+
       return response.json();
     },
     onSuccess: (_, variables) => {
-      const [year, month] = variables.date.split('-').map(Number);
-      queryClient.invalidateQueries({ queryKey: ["/api/schedule", year, month] });
+      const [year, month] = variables.date.split("-").map(Number);
+      queryClient.invalidateQueries({
+        queryKey: ["/api/schedule", year, month],
+      });
     },
   });
 }
