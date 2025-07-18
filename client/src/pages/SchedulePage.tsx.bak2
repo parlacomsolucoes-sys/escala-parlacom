@@ -43,7 +43,7 @@ export default function SchedulePage() {
       checkDate.setDate(today.getDate() + i);
       
       if (checkDate.getDay() === 6 || checkDate.getDay() === 0) { // Saturday or Sunday
-        const dateString = formatDateKey(checkDate);
+        const dateString = checkDate.toISOString().split('T')[0];
         const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
         
         if (checkDate >= today) {
@@ -202,13 +202,17 @@ export default function SchedulePage() {
     };
   };
 
-  // Fixed day click handler - only opens modal
+  // PHASE 3: Enhanced day click handler
   const handleDayClick = (day: any) => {
     setSelectedDay({
       date: day.dateString,
       assignments: day.assignments
     });
-    // Modal will open automatically due to selectedDay state change
+    
+    // Auto-switch to day view when clicking a day
+    if (viewMode !== "day") {
+      setViewMode("day");
+    }
   };
 
   // PHASE 3: Week navigation

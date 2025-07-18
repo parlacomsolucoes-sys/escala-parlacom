@@ -107,21 +107,6 @@ export const generateMonthlyScheduleSchema = z.object({
 
 export type GenerateMonthlyScheduleRequest = z.infer<typeof generateMonthlyScheduleSchema>;
 
-// Weekend Rotation Metadata schema
-export const rotationMetaSchema = z.object({
-  rotationIndex: z.number().default(0),
-  swapParity: z.number().min(0).max(1).default(0),
-  lastProcessedWeekendISO: z.string().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string()
-});
-
-export type RotationMeta = z.infer<typeof rotationMetaSchema>;
-
-export interface RotationMetaDoc extends RotationMeta {
-  id: string; // Format: YYYY-MM
-}
-
 // Utility function to normalize time format
 export function normalizeTime(time: string): string {
   const match = time.match(/^(\d{1,2}):(\d{2})$/);

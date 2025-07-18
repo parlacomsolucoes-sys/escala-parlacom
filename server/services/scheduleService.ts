@@ -1,5 +1,5 @@
 import { adminDb } from "../firebase-admin";
-import type { Employee, Holiday, ScheduleEntry, Assignment } from "@shared/schema";
+import type { Employee, Holiday, ScheduleEntry, Assignment, RotationMeta, RotationMetaDoc } from "@shared/schema";
 import { getWeekNumber, isWeekend, isHoliday, normalizeTime } from "@shared/schema";
 import { formatDateKey } from "@shared/utils/date";
 
@@ -7,6 +7,7 @@ export class ScheduleService {
   private employeesCollection = adminDb.collection('employees');
   private holidaysCollection = adminDb.collection('holidays');
   private scheduleCollection = adminDb.collection('schedule');
+  private rotationMetaCollection = adminDb.collection('rotationMeta');
 
   async generateMonthlySchedule(year: number, month: number): Promise<ScheduleEntry[]> {
     // Get all active employees
@@ -158,7 +159,7 @@ export class ScheduleService {
     return scheduleEntry;
   }
 
-  // PHASE 2: Idempotent weekend schedule generation
+  // PHASE 2: Enhanced weekend rotation system with automatic alternation
   async generateWeekendSchedule(year: number, month: number, force: boolean = false): Promise<{
     daysGenerated: number;
     changedCount: number;
@@ -166,10 +167,12 @@ export class ScheduleService {
     eligibleEmployees: number;
     totalWeekendDaysProcessed: number;
     employeesUsed: string[];
+    pattern: string;
+    updatedDays: string[];
   }> {
     console.log(`[WEEKEND] Generating weekend schedule for ${month}/${year}, force=${force}`);
     
-    // Get all active employees with weekend rotation
+    // Get all active employees with weekend rotation, sorted by name for determinism
     const employeesSnapshot = await this.employeesCollection
       .where('isActive', '==', true)
       .where('weekendRotation', '==', true)
@@ -191,11 +194,17 @@ export class ScheduleService {
         skippedHolidays: [],
         eligibleEmployees: 0,
         totalWeekendDaysProcessed: 0,
-        employeesUsed: []
+        employeesUsed: [],
+        pattern: "none",
+        updatedDays: []
       };
     }
 
     console.log(`[WEEKEND] Found ${weekendEmployees.length} eligible employees:`, weekendEmployees.map(e => e.name));
+
+    // Get rotation metadata for this month
+    const rotationId = `${year}-${String(month).padStart(2, '0')}`;
+    const rotationMeta = await this.getOrCreateRotationMeta(rotationId);
 
     // Get all holidays
     const holidaysSnapshot = await this.holidaysCollection.get();
@@ -204,126 +213,245 @@ export class ScheduleService {
       ...doc.data(),
     })) as Holiday[];
 
-    // Get weekend days in month
-    const lastDay = new Date(year, month, 0);
-    const weekendDates: Date[] = [];
-    
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      const date = new Date(year, month - 1, day);
-      const dayOfWeek = date.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
-        weekendDates.push(date);
-      }
-    }
-
-    console.log(`[WEEKEND] Found ${weekendDates.length} weekend days in ${month}/${year}`);
+    // Get weekend days grouped by weeks
+    const weekendWeeks = this.getWeekendWeeks(year, month);
+    console.log(`[WEEKEND] Found ${weekendWeeks.length} weekend weeks in ${month}/${year}`);
 
     let daysGenerated = 0;
     let changedCount = 0;
-    let employeeIndex = 0;
     const skippedHolidays: string[] = [];
     const employeesUsed: string[] = [];
+    const updatedDays: string[] = [];
 
-    for (const date of weekendDates) {
-      const dateString = formatDateKey(date);
-      const dayOfWeek = date.getDay();
+    let currentRotationIndex = rotationMeta.rotationIndex;
+    let currentSwapParity = rotationMeta.swapParity;
 
-      // Check if it's a holiday
-      if (isHoliday(date, holidays)) {
-        console.log(`[WEEKEND] Skipping holiday: ${dateString}`);
-        skippedHolidays.push(dateString);
-        continue;
-      }
-
-      // Get the employee for this weekend day (round-robin)
-      const employee = weekendEmployees[employeeIndex % weekendEmployees.length];
-      employeeIndex++;
-
-      if (!employeesUsed.includes(employee.name)) {
-        employeesUsed.push(employee.name);
-      }
-
-      // Create assignment
-      const assignment: Assignment = {
-        id: `${employee.id}-${dateString}`,
-        employeeId: employee.id,
-        employeeName: employee.name,
-        startTime: employee.customSchedule?.[dayOfWeek === 6 ? 'saturday' : 'sunday']?.startTime || employee.defaultStartTime,
-        endTime: employee.customSchedule?.[dayOfWeek === 6 ? 'saturday' : 'sunday']?.endTime || employee.defaultEndTime,
-      };
-
-      // Get existing schedule entry
-      const scheduleRef = this.scheduleCollection.doc(dateString);
-      const existingDoc = await scheduleRef.get();
+    // Process each weekend week
+    for (const week of weekendWeeks) {
+      const { saturday, sunday } = week;
       
-      let shouldUpdate = force;
-      let existingAssignments: Assignment[] = [];
+      // Process Saturday and Sunday as a pair
+      const weekendPair = [saturday, sunday].filter(date => date !== null);
+      const assignments = this.calculateWeekendAssignments(
+        weekendEmployees,
+        currentRotationIndex,
+        currentSwapParity,
+        weekendPair
+      );
 
-      if (existingDoc.exists) {
-        const existingData = existingDoc.data();
-        existingAssignments = existingData?.assignments || [];
+      for (let i = 0; i < weekendPair.length; i++) {
+        const date = weekendPair[i];
+        const employee = assignments[i];
         
-        // Check if this exact assignment already exists (idempotency check)
-        const existingWeekendAssignment = existingAssignments.find(
-          a => weekendEmployees.some(emp => emp.id === a.employeeId)
-        );
+        const dateString = formatDateKey(date);
+        const dayOfWeek = date.getDay();
 
-        if (!existingWeekendAssignment) {
-          shouldUpdate = true; // No weekend assignment exists yet
-        } else if (existingWeekendAssignment.employeeId !== employee.id) {
-          shouldUpdate = true; // Different employee would be assigned
+        // Check if it's a holiday
+        const holiday = isHoliday(date, holidays);
+        if (holiday) {
+          console.log(`[WEEKEND] ⏭️  Skipping ${dateString} (${holiday.name})`);
+          skippedHolidays.push(dateString);
+          continue;
         }
-        // If same employee already assigned, keep shouldUpdate = force
-      } else {
-        shouldUpdate = true; // No schedule exists for this day
-      }
 
-      if (shouldUpdate) {
-        // Remove existing weekend rotation employees from this day
-        const filteredAssignments = existingAssignments.filter(
-          (a: Assignment) => !weekendEmployees.some(emp => emp.id === a.employeeId)
+        // Get current schedule for this day
+        const docRef = this.scheduleCollection.doc(dateString);
+        const doc = await docRef.get();
+        const existingSchedule = doc.exists ? doc.data() as ScheduleEntry : null;
+
+        // Check if this employee is already assigned to this day
+        const existingAssignment = existingSchedule?.assignments?.find(
+          a => a.employeeId === employee.id
         );
-        
-        // Add new assignment
-        filteredAssignments.push(assignment);
-        
-        if (existingDoc.exists) {
-          await scheduleRef.update({
-            assignments: filteredAssignments,
-            updatedAt: new Date().toISOString()
-          });
+
+        if (existingAssignment && !force) {
+          console.log(`[WEEKEND] ⚡ ${dateString} already has correct assignment (${employee.name})`);
         } else {
-          // Create new schedule entry
-          const scheduleEntry = {
+          // Remove existing weekend rotation assignments from this day
+          let assignments = existingSchedule?.assignments || [];
+          assignments = assignments.filter(a => !weekendEmployees.some(we => we.id === a.employeeId));
+
+          // Get employee's schedule for this day
+          const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek];
+          const customSchedule = employee.customSchedule?.[dayName];
+          
+          const startTime = customSchedule?.startTime || employee.defaultStartTime;
+          const endTime = customSchedule?.endTime || employee.defaultEndTime;
+
+          // Add new assignment
+          const assignment: Assignment = {
+            id: `${employee.id}-${dateString}`,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            startTime: normalizeTime(startTime),
+            endTime: normalizeTime(endTime)
+          };
+
+          assignments.push(assignment);
+
+          // Update the schedule
+          const scheduleEntry: ScheduleEntry = {
+            id: dateString,
             date: dateString,
-            assignments: filteredAssignments,
-            createdAt: new Date().toISOString(),
+            assignments,
+            createdAt: existingSchedule?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
-          
-          await scheduleRef.set(scheduleEntry);
+
+          await docRef.set(scheduleEntry);
+          console.log(`[WEEKEND] ✅ Assigned ${employee.name} to ${dateString} (${dayOfWeek === 6 ? 'Saturday' : 'Sunday'})`);
+          changedCount++;
+          updatedDays.push(dateString);
         }
 
-        console.log(`[WEEKEND] ✅ Assigned ${employee.name} to ${dateString} (${dayOfWeek === 0 ? 'Sunday' : 'Saturday'})`);
-        changedCount++;
-      } else {
-        console.log(`[WEEKEND] ⚡ ${dateString} already has correct assignment (${employee.name})`);
+        if (!employeesUsed.includes(employee.name)) {
+          employeesUsed.push(employee.name);
+        }
+
+        daysGenerated++;
       }
 
-      daysGenerated++;
+      // Update rotation for next week
+      if (weekendEmployees.length === 2) {
+        // Two employees: just swap parity
+        currentSwapParity = 1 - currentSwapParity;
+      } else if (weekendEmployees.length > 2) {
+        // More than 2: advance index by 2 and swap parity
+        currentRotationIndex = (currentRotationIndex + 2) % weekendEmployees.length;
+        currentSwapParity = 1 - currentSwapParity;
+      }
+      // Single employee: no change needed
     }
 
-    const result = {
+    // Update rotation metadata
+    await this.updateRotationMeta(rotationId, {
+      rotationIndex: currentRotationIndex,
+      swapParity: currentSwapParity,
+      lastProcessedWeekendISO: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const pattern = weekendEmployees.length === 1 ? "single" : 
+                   weekendEmployees.length === 2 ? "pair" : "multiple";
+
+    console.log(`[WEEKEND] ✅ Complete:`, {
       daysGenerated,
       changedCount,
       skippedHolidays,
       eligibleEmployees: weekendEmployees.length,
-      totalWeekendDaysProcessed: weekendDates.length,
-      employeesUsed
-    };
+      totalWeekendDaysProcessed: daysGenerated,
+      employeesUsed,
+      pattern,
+      updatedDays
+    });
 
-    console.log(`[WEEKEND] ✅ Complete:`, result);
-    return result;
+    return {
+      daysGenerated,
+      changedCount,
+      skippedHolidays,
+      eligibleEmployees: weekendEmployees.length,
+      totalWeekendDaysProcessed: daysGenerated,
+      employeesUsed,
+      pattern,
+      updatedDays
+    };
+  }
+
+  // Helper function to get or create rotation metadata
+  private async getOrCreateRotationMeta(rotationId: string): Promise<RotationMeta> {
+    const doc = await this.rotationMetaCollection.doc(rotationId).get();
+    
+    if (doc.exists) {
+      return doc.data() as RotationMeta;
+    }
+    
+    // Create new rotation metadata
+    const newMeta: RotationMeta = {
+      rotationIndex: 0,
+      swapParity: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    await this.rotationMetaCollection.doc(rotationId).set(newMeta);
+    return newMeta;
+  }
+
+  // Helper function to update rotation metadata
+  private async updateRotationMeta(rotationId: string, updates: Partial<RotationMeta>): Promise<void> {
+    await this.rotationMetaCollection.doc(rotationId).update(updates);
+  }
+
+  // Helper function to get weekend weeks in a month
+  private getWeekendWeeks(year: number, month: number): Array<{ saturday: Date | null; sunday: Date | null }> {
+    const weeks: Array<{ saturday: Date | null; sunday: Date | null }> = [];
+    const lastDay = new Date(year, month, 0);
+    
+    for (let day = 1; day <= lastDay.getDate(); day++) {
+      const date = new Date(year, month - 1, day);
+      const dayOfWeek = date.getDay();
+      
+      if (dayOfWeek === 6) { // Saturday
+        // Look for next day (Sunday)
+        const nextDay = new Date(year, month - 1, day + 1);
+        const sunday = nextDay.getMonth() === month - 1 ? nextDay : null;
+        
+        weeks.push({ saturday: date, sunday });
+      } else if (dayOfWeek === 0) { // Sunday
+        // Check if we already have this sunday in a week
+        const existingWeek = weeks.find(w => w.sunday?.getTime() === date.getTime());
+        if (!existingWeek) {
+          weeks.push({ saturday: null, sunday: date });
+        }
+      }
+    }
+    
+    return weeks;
+  }
+
+  // Helper function to calculate weekend assignments based on rotation logic
+  private calculateWeekendAssignments(
+    employees: Employee[],
+    rotationIndex: number,
+    swapParity: number,
+    weekendDates: Date[]
+  ): Employee[] {
+    if (employees.length === 0) return [];
+    
+    if (employees.length === 1) {
+      // Single employee covers all weekend days
+      return weekendDates.map(() => employees[0]);
+    }
+    
+    if (employees.length === 2) {
+      // Two employees: alternate based on parity
+      const [emp1, emp2] = employees;
+      if (swapParity === 0) {
+        return weekendDates.map((_, index) => index % 2 === 0 ? emp1 : emp2);
+      } else {
+        return weekendDates.map((_, index) => index % 2 === 0 ? emp2 : emp1);
+      }
+    }
+    
+    // Multiple employees: use rotation index and parity
+    const assignments: Employee[] = [];
+    for (let i = 0; i < weekendDates.length; i++) {
+      const employeeIndex = (rotationIndex + i) % employees.length;
+      let employee = employees[employeeIndex];
+      
+      // Apply parity-based swapping for pairs
+      if (swapParity === 1 && i % 2 === 0 && i + 1 < weekendDates.length) {
+        const nextEmployeeIndex = (rotationIndex + i + 1) % employees.length;
+        const nextEmployee = employees[nextEmployeeIndex];
+        assignments.push(nextEmployee);
+        assignments.push(employee);
+        i++; // Skip next iteration as we handled both
+      } else {
+        assignments.push(employee);
+      }
+    }
+    
+    return assignments;
   }
 }
 

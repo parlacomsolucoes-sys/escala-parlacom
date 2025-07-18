@@ -1,0 +1,169 @@
+**PROMPT (INSTRUÇÕES ADICIONAIS – REVEZAMENTO AUTOMÁTICO DE FINAIS DE SEMANA E MODAL DE EDIÇÃO NO CLIQUE DO DIA)**
+Aplicar **somente** as mudanças descritas abaixo. Seguir ordem. Criar backup (`.bak`) antes de alterar cada arquivo. Fornecer ao final um breve relatório do que foi feito e dos testes manuais. **Não adicionar novas dependências.** Nenhuma credencial deve ser logada.
+
+---
+
+## 1. OBJETIVOS
+
+1. **Revezamento automático de finais de semana (sábado/domingo)** entre os funcionários marcados com `weekendRotation: true`, obedecendo padrão:
+
+   * No mesmo final de semana: distribuir pessoas entre sábado e domingo (um funcionário por dia – se houver mais pessoas, usar combinação mínima e avançar nas próximas semanas).
+   * **Alternância semanal**: o funcionário que trabalhou sábado nesta semana trabalha domingo na próxima, e vice‑versa (para pares de funcionários).
+   * Se houver mais de 2 funcionários, usar fila circular onde cada final de semana consome *dois slots consecutivos* (um para sábado, outro para domingo) e na semana seguinte inverte a ordem **dos dois próximos** ou, se for par de funcionários específico, rotacionar mantendo a inversão.
+2. **Geração automática**: sempre que abrir o mês ou acessar a rota/ação de “gerar fins de semana” (rota já existente ou a criar), aplicar o algoritmo e gravar/atualizar os dias de sábados e domingos desse mês (idempotente).
+3. **Clique em qualquer dia do calendário** abre **apenas** o modal de edição (DayEditModal) com as assignments daquele dia — nunca navegar para outra página/rota. Corrigir qualquer comportamento que altere o dia exibido incorretamente (timezone / off by one).
+4. **Modal** deve sempre refletir a escala atual (após revezamento) e permitir editar manualmente.
+
+---
+
+## 2. DADOS / ESTRUTURA
+
+* Funcionários: campo boolean `weekendRotation`.
+* Agendamento: documentos em coleção `schedule` com chave `YYYY-MM-DD`.
+* Necessário adicionar (se não existir) um **documento de controle** do revezamento para cada mês (ex.: coleção `rotationMeta`, id `YYYY-MM`, contendo):
+
+  * `lastProcessedWeekendISO` (opcional)
+  * `rotationIndex` (número inteiro, posição atual na fila circular)
+  * `swapParity` (0 ou 1) para controlar inversão sábado/domingo semana a semana quando há exatamente 2 funcionários.
+  * (Se mais de 2 funcionários) armazenar simplesmente `rotationIndex` e não usar `swapParity` – a inversão é construída consumindo pares consecutivos e invertendo a ordem do par seguinte para balancear.
+* Não adicionar libs; usar Firestore existente.
+
+---
+
+## 3. ALGORITMO DE REVEZAMENTO
+
+### Casos:
+
+**A) Exatamente 2 funcionários (A, B)**
+
+* Semana 1: Sábado = A, Domingo = B
+* Semana 2: Sábado = B, Domingo = A
+* Semana 3: Sábado = A, Domingo = B … (alternando)
+  Implementar via `swapParity` (par = ordem normal, ímpar = invertida).
+
+**B) Mais de 2 funcionários (lista ordenada por nome ou data de criação para determinismo)**
+
+* Tratar a lista como fila circular. Cada final de semana consome duas posições consecutivas:
+
+  * Exemplo (funcionários \[A, B, C, D]):
+    Semana 1: Sábado=A, Domingo=B
+    Semana 2: Sábado=C, Domingo=D
+    Semana 3: Sábado=A, Domingo=B (reinício)
+  * **Inversão**: para reduzir viés de quem pega mais sábados ou mais domingos, alternar a ordem interna dos pares a cada ciclo completo ou a cada semana:
+
+    * Semana 1 (paridade 0): (A,B)
+    * Semana 2 (paridade 1): (D,C) (inverso do par “(C,D)”)
+    * Semana 3 (paridade 0): (A,B)
+    * Semana 4 (paridade 1): (B,A) (inversão do primeiro par)
+  * Simplificação aceitável: alternar entre **ordem normal** e **ordem invertida** do par designado a cada final de semana (`swapParity` global).
+* Atualizar `rotationIndex = (rotationIndex + 2) % employees.length` após atribuição (porque consumimos 2 slots).
+
+**C) Apenas 1 funcionário**
+
+* Esse funcionário cobre ambos os dias (sábado e domingo) — ou, se política desejar apenas um dia, definir claramente (mas aqui: manter ambos para garantir cobertura). Documentar no relatório.
+
+### Passos Comuns:
+
+1. Carregar/filtrar funcionários `weekendRotation === true` e `isActive === true`.
+2. Ordenar por nome (ou ID) para determinismo.
+3. Carregar/gerar `rotationMeta` do mês. Se ausente, inicializar `rotationIndex=0`, `swapParity=0`.
+4. Listar todos os sábados e domingos do mês atual (usar helper local de data sem `toISOString()`).
+5. Para cada final de semana (sáb+dom juntos):
+
+   * Definir par (ou único) de acordo com caso A/B/C.
+   * Aplicar inversão conforme paridade.
+   * Criar/atualizar documento de cada dia:
+
+     * Remover assignments anteriores apenas dos funcionários rotativos (não tocar em outros).
+     * Adicionar assignment (um por dia) usando horários default do funcionário (ou customSchedule).
+6. Atualizar meta:
+
+   * Se 2 funcionários → apenas alternar `swapParity = 1 - swapParity`.
+   * Se >2 → `rotationIndex` avançado + alternar `swapParity`.
+7. Operação idempotente: se já existem assignments nesses dias para esses funcionários **e** correspondem ao resultado esperado, não duplicar nem criar múltiplos. Comparar por `employeeId` + hora.
+
+---
+
+## 4. ROTA / DISPARO
+
+* Garantir existência de rota `POST /api/schedule/generate-weekends` protegida por auth (admin).
+* Aceitar `{ year, month }` opcional; default = mês atual.
+* Retornar JSON: `{ weekendsProcessed, employeesConsidered, pattern: "pair|two|single", updatedDays }`.
+* Registrar logs só com contagens (nunca nomes completos em produção se for sensível).
+
+**Gatilho Automático (opcional se acordado):** Ao acessar a página de escala pela primeira vez no mês, se nenhum sábado do mês tiver assignment de rotação, chamar a rota via frontend (somente se user autenticado).
+
+---
+
+## 5. CORREÇÃO DO CLIQUE → MODAL
+
+1. Em `SchedulePage`, remover qualquer navegação de rota ao clicar no dia.
+2. OnClick de uma célula de dia:
+
+   * Pegar a chave exata `YYYY-MM-DD` já calculada (sem deslocamento).
+   * Setar estado `selectedDay = { date, assignments }`.
+   * Abrir `DayEditModal`.
+3. Garantir que não há offset: substituir todos `toISOString().split('T')[0]` por helper `formatDateKey(date)`:
+
+   ```ts
+   // (não escrever código aqui no prompt; apenas instrução)
+   // formatDateKey usa getFullYear(), getMonth()+1, getDate()
+   ```
+4. Testar clique em primeiros e últimos dias do mês e dias de transbordo (se mostrados) — ignorar dias fora do mês ou permitir apenas leitura (decidir comportamento e implementar).
+
+---
+
+## 6. MODAL DE EDIÇÃO
+
+* Ao abrir, modal sempre mostra assignments atuais.
+* Após salvar mudanças manuais, manter consistência (não duplicar IDs).
+* IDs de assignments para rotação fim de semana sugeridos: `${employeeId}-${date}` (já padrão).
+* Se usuário editar manualmente, geração futura **não deve duplicar** — atualizar lógica para:
+
+  * Antes de inserir, verificar se já existe assignment desse `employeeId` no dia; se sim, atualizar (ou pular).
+
+---
+
+## 7. TESTES MANUAIS (EXECUTAR E REPORTAR)
+
+| Teste | Cenário                                                           | Esperado                                                                    |
+| ----- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| T1    | 2 funcionários rotativos mês vazio gerar                          | Sáb=FuncA, Dom=FuncB primeira semana                                        |
+| T2    | Regerar mesma semana                                              | Sem alteração / idempotente                                                 |
+| T3    | Semana seguinte gerar novamente                                   | Ordem invertida (Sáb=FuncB, Dom=FuncA)                                      |
+| T4    | >2 funcionários (ex: 3 ou 4)                                      | Distribuição circular sem repetir par imediatamente                         |
+| T5    | Apenas 1 funcionário                                              | Aparece nos dois dias                                                       |
+| T6    | Clique dia X                                                      | Modal abre dia X correto                                                    |
+| T7    | Dias consecutivos clique                                          | Sempre dia correto                                                          |
+| T8    | Edição manual horário sábado                                      | Mantém após gerar novamente (não duplica)                                   |
+| T9    | Feriado caindo em sábado/domingo (se lógica de feriado existindo) | Decidir: se feriado → remover ou manter; implementar; refletir no relatório |
+| T10   | Mudar mês                                                         | Nova geração correta meta separada                                          |
+
+Executar testes e registrar resultados.
+
+---
+
+## 8. RELATÓRIO FINAL (ENTREGAR)
+
+Incluir:
+
+* Arquivos alterados.
+* Estratégia adotada para rotação (casos A/B/C).
+* Como garantiu idempotência.
+* Verificação do bug de clique.
+* Resultado da tabela de testes.
+* Pendências (ex.: melhorias futuras de interface / múltiplos funcionários por dia de fim de semana se necessário).
+
+---
+
+## 9. RESTRIÇÕES
+
+* Sem novas bibliotecas.
+* Sem alteração em regras de segurança além do necessário para rota.
+* Não remover funcionalidades existentes de edição diária.
+* Não logar informações sensíveis.
+
+---
+
+**EXECUTAR ESTE PLANO E ENTREGAR RELATÓRIO CONFORME ITEM 8.**
+FIM DO PROMPT.

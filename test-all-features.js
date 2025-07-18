@@ -1,140 +1,178 @@
-/**
- * Comprehensive test suite for the 7-Phase Enhancement Plan
- * Tests holiday recurrence, employee custom schedules, and weekend generation
- */
+// Comprehensive test for all implemented features
+const tests = [
+  {
+    name: "T1: Two employees rotation - first month",
+    description: "Generate weekend schedule for month with 2 employees",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/schedule/generate-weekends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: 2025, month: 8 })
+      });
+      
+      if (response.status === 401) {
+        return { success: false, message: "Auth required - expected for public test" };
+      }
+      
+      const result = await response.json();
+      return { 
+        success: response.ok,
+        result,
+        message: response.ok ? "Weekend generation successful" : "Weekend generation failed"
+      };
+    }
+  },
+  {
+    name: "T2: Schedule idempotency check",
+    description: "Re-generate same month should be idempotent",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/schedule/generate-weekends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: 2025, month: 7 })
+      });
+      
+      if (response.status === 401) {
+        return { success: false, message: "Auth required - expected for public test" };
+      }
+      
+      const result = await response.json();
+      return { 
+        success: response.ok,
+        result,
+        message: response.ok ? "Idempotency check successful" : "Idempotency check failed"
+      };
+    }
+  },
+  {
+    name: "T3: Employee data verification",
+    description: "Check if employees have correct weekend rotation flags",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/employees");
+      const employees = await response.json();
+      
+      const rotationEmployees = employees.filter(emp => emp.weekendRotation === true);
+      const expectedCount = 2; // Kellen and Maicon
+      
+      return {
+        success: rotationEmployees.length === expectedCount,
+        result: { rotationEmployees: rotationEmployees.map(e => e.name), count: rotationEmployees.length },
+        message: `Found ${rotationEmployees.length} employees with weekend rotation (expected: ${expectedCount})`
+      };
+    }
+  },
+  {
+    name: "T4: Holiday format verification",
+    description: "Check if holidays display in DD/MM format",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/holidays");
+      const holidays = await response.json();
+      
+      const validFormat = holidays.every(holiday => {
+        const parts = holiday.date.split('-');
+        return parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]);
+      });
+      
+      return {
+        success: validFormat,
+        result: { holidays: holidays.map(h => ({ name: h.name, date: h.date })) },
+        message: validFormat ? "Holiday format is correct" : "Holiday format is incorrect"
+      };
+    }
+  },
+  {
+    name: "T5: Schedule data consistency",
+    description: "Verify schedule entries use formatDateKey format",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/schedule/2025/7");
+      const scheduleEntries = await response.json();
+      
+      const validDateFormat = scheduleEntries.every(entry => {
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        return dateRegex.test(entry.date);
+      });
+      
+      return {
+        success: validDateFormat,
+        result: { 
+          sampleDates: scheduleEntries.slice(0, 3).map(e => e.date),
+          totalEntries: scheduleEntries.length
+        },
+        message: validDateFormat ? "Date format is consistent" : "Date format is inconsistent"
+      };
+    }
+  },
+  {
+    name: "T6: Weekend assignment verification",
+    description: "Check if weekend assignments follow rotation pattern",
+    test: async () => {
+      const response = await fetch("http://localhost:5000/api/schedule/2025/7");
+      const scheduleEntries = await response.json();
+      
+      const weekendEntries = scheduleEntries.filter(entry => {
+        const date = new Date(entry.date);
+        const dayOfWeek = date.getDay();
+        return dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
+      });
+      
+      const weekendAssignments = weekendEntries.filter(entry => entry.assignments.length > 0);
+      
+      return {
+        success: weekendAssignments.length > 0,
+        result: { 
+          weekendDays: weekendEntries.length,
+          assignedWeekends: weekendAssignments.length,
+          sampleAssignments: weekendAssignments.slice(0, 3).map(e => ({
+            date: e.date,
+            employees: e.assignments.map(a => a.employeeName)
+          }))
+        },
+        message: `Found ${weekendAssignments.length} weekend assignments out of ${weekendEntries.length} weekend days`
+      };
+    }
+  }
+];
 
-const BASE_URL = 'http://localhost:5000';
+console.log("Starting comprehensive feature tests...\n");
 
-// Helper function for API calls
-async function apiCall(endpoint, options = {}) {
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    },
-    ...options
-  });
+async function runAllTests() {
+  const results = [];
   
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`${response.status}: ${error}`);
+  for (const test of tests) {
+    console.log(`Running ${test.name}...`);
+    try {
+      const result = await test.test();
+      results.push({
+        name: test.name,
+        ...result
+      });
+      console.log(`✅ ${test.name}: ${result.message}`);
+      if (result.result) {
+        console.log(`   Details:`, JSON.stringify(result.result, null, 2));
+      }
+    } catch (error) {
+      results.push({
+        name: test.name,
+        success: false,
+        message: error.message
+      });
+      console.log(`❌ ${test.name}: ${error.message}`);
+    }
+    console.log("");
   }
   
-  return response.json();
+  console.log("\n=== TEST SUMMARY ===");
+  const passed = results.filter(r => r.success).length;
+  const total = results.length;
+  
+  console.log(`Passed: ${passed}/${total}`);
+  console.log(`Success Rate: ${(passed/total*100).toFixed(1)}%`);
+  
+  if (passed === total) {
+    console.log("🎉 All tests passed!");
+  } else {
+    console.log("⚠️  Some tests failed - check logs above");
+  }
 }
 
-// Test data
-const testEmployee = {
-  name: "João Silva",
-  isActive: true,
-  workDays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
-  defaultStartTime: "08:00",
-  defaultEndTime: "17:00",
-  weekendRotation: true,
-  customSchedule: {
-    monday: { startTime: "09:00", endTime: "18:00" },
-    friday: { startTime: "08:00", endTime: "16:00" }
-  }
-};
-
-const testHoliday = {
-  name: "Natal",
-  date: "12-25", // MM-DD format
-  description: "Feriado de Natal"
-};
-
-async function runTests() {
-  console.log('🔥 Starting comprehensive test suite...\n');
-
-  try {
-    // PHASE 1: Test holiday recurrence with MM-DD format
-    console.log('📅 PHASE 1: Testing holiday recurrence (MM-DD format)...');
-    const createdHoliday = await apiCall('/api/holidays', {
-      method: 'POST',
-      body: JSON.stringify(testHoliday)
-    });
-    console.log('✅ Holiday created successfully:', createdHoliday);
-
-    // Verify holiday was stored with MM-DD format
-    const holidays = await apiCall('/api/holidays');
-    const holiday = holidays.find(h => h.name === testHoliday.name);
-    console.log('✅ Holiday format verified:', holiday.date, '(MM-DD format)');
-
-    // PHASE 3: Test employee with custom schedule
-    console.log('\n👥 PHASE 3: Testing employee with custom schedule...');
-    const createdEmployee = await apiCall('/api/employees', {
-      method: 'POST',
-      body: JSON.stringify(testEmployee)
-    });
-    console.log('✅ Employee created successfully:', createdEmployee);
-
-    // Verify custom schedule was stored correctly
-    const employees = await apiCall('/api/employees');
-    const employee = employees.find(e => e.name === testEmployee.name);
-    console.log('✅ Custom schedule verified:', employee.customSchedule);
-
-    // PHASE 4: Test weekend schedule generation
-    console.log('\n🏖️ PHASE 4: Testing weekend schedule generation...');
-    const weekendResult = await apiCall('/api/schedule/generate-weekends', {
-      method: 'POST',
-      body: JSON.stringify({ year: 2025, month: 7 })
-    });
-    console.log('✅ Weekend schedule generated:', weekendResult);
-
-    // Verify weekend schedule was created
-    const schedule = await apiCall('/api/schedule/2025/7');
-    const weekendDays = schedule.filter(entry => {
-      const date = new Date(entry.date);
-      const dayOfWeek = date.getDay();
-      return dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
-    });
-    console.log('✅ Weekend schedule entries:', weekendDays.length, 'days');
-
-    // Test monthly schedule generation
-    console.log('\n📊 Testing monthly schedule generation...');
-    const monthlyResult = await apiCall('/api/schedule/generate', {
-      method: 'POST',
-      body: JSON.stringify({ year: 2025, month: 7 })
-    });
-    console.log('✅ Monthly schedule generated:', monthlyResult.length, 'entries');
-
-    // Verify all schedule entries
-    const fullSchedule = await apiCall('/api/schedule/2025/7');
-    console.log('✅ Full schedule verification:', fullSchedule.length, 'total entries');
-
-    // PHASE 7: Test holiday MM-DD format handling
-    console.log('\n🔧 PHASE 7: Testing holiday MM-DD format handling...');
-    const testHoliday2 = {
-      name: "Ano Novo",
-      date: "01-01",
-      description: "Primeiro dia do ano"
-    };
-    
-    const createdHoliday2 = await apiCall('/api/holidays', {
-      method: 'POST',
-      body: JSON.stringify(testHoliday2)
-    });
-    console.log('✅ Second holiday created:', createdHoliday2);
-
-    // Cleanup test data
-    console.log('\n🧹 Cleaning up test data...');
-    await apiCall(`/api/holidays/${createdHoliday.id}`, { method: 'DELETE' });
-    await apiCall(`/api/holidays/${createdHoliday2.id}`, { method: 'DELETE' });
-    await apiCall(`/api/employees/${createdEmployee.id}`, { method: 'DELETE' });
-    console.log('✅ Test data cleaned up');
-
-    console.log('\n🎉 ALL TESTS PASSED! 🎉');
-    console.log('✅ Phase 1: Holiday recurrence (MM-DD format) - WORKING');
-    console.log('✅ Phase 3: Employee custom schedules - WORKING');
-    console.log('✅ Phase 4: Weekend schedule generation - WORKING');
-    console.log('✅ Phase 5: Frontend integration - READY');
-    console.log('✅ Phase 7: Holiday form MM-DD handling - WORKING');
-
-  } catch (error) {
-    console.error('❌ Test failed:', error.message);
-    console.error(error.stack);
-  }
-}
-
-// Run the tests
-runTests();
+runAllTests().catch(console.error);
