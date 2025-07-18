@@ -1,0 +1,195 @@
+
+
+## PROMPT (INSTRUÇÕES DETALHADAS) 
+
+Quero que você realize uma série de ajustes no meu projeto (Express + Firebase Admin + React + Vite) chamado **Escala-Parlacom**.
+Siga exatamente as fases abaixo. **Não escreva novos recursos fora do solicitado**. Para cada fase:
+
+1. Verifique se o arquivo existe.
+2. Faça backup (copie o conteúdo antigo para um arquivo `.bak` ou com sufixo `.old`).
+3. Aplique as mudanças solicitadas.
+4. Diga o que alterou e valide.
+
+### CONTEXTO DAS MUDANÇAS
+
+Atualmente:
+
+* Funcionários são criados, mas não entram automaticamente na escala.
+* Existe um gerador de escala mensal completa; quero substituir o conceito para: os dias úteis seguem horários fixos do funcionário; **apenas finais de semana (sábado e domingo)** precisam de rotação entre funcionários marcados com `weekendRotation=true`.
+* Feriados devem ser recorrentes (não dependem de ano) e armazenados como `MM-DD`.
+* Inputs de horários no cadastro de funcionário precisam permitir horário distinto por dia marcado.
+* Desejo uma rota específica para gerar (ou regenerar) apenas a escala de finais de semana de um mês selecionado.
+* Ao criar funcionário, preencher automaticamente os dias remanescentes do mês atual em que ele trabalha (exceto feriados).
+
+---
+
+## FASE 1 – AJUSTE DE FERiados (RECORRÊNCIA)
+
+**Objetivo:** Tornar feriados recorrentes (formato `MM-DD`).
+**Instruções:**
+
+1. No schema de feriados, aceitar tanto `MM-DD` quanto, por compatibilidade, o antigo `YYYY-MM-DD` (se vier com ano, descartar o ano ao salvar).
+2. Converter feriados existentes no banco (se houver) cortando o prefixo de ano (manter só mês e dia).
+3. Ajustar função que verifica feriado para comparar somente mês-dia (se registro vier antigo ainda com ano, tratar também).
+4. Ao criar ou atualizar feriado, normalizar para `MM-DD` antes de salvar.
+5. Validar criando um feriado de teste e verificando se permanece `MM-DD`.
+
+---
+
+## FASE 2 – CRIAÇÃO AUTOMÁTICA DE ESCALA PARA NOVO FUNCIONÁRIO
+
+**Objetivo:** Ao criar um funcionário, preencher automaticamente os dias restantes do mês atual (do dia de hoje até o último dia do mês) com seus horários.
+**Instruções:**
+
+1. Após salvar o funcionário, buscar dias restantes do mês corrente.
+2. Para cada dia:
+
+   * Verificar se é um feriado (via lógica recorrente).
+   * Verificar se o dia da semana está na lista `workDays` do funcionário.
+   * Determinar horários: usar `customSchedule` se existir para o dia, senão `defaultStartTime`/`defaultEndTime`.
+   * Inserir (ou atualizar se já existir) a entrada da agenda daquele dia adicionando assignment do funcionário (evitar duplicar se já estiver).
+3. Logar um aviso se falhar, mas não impedir criação do funcionário.
+
+---
+
+## FASE 3 – INPUTS DE HORÁRIO E CUSTOM POR DIA NO FRONT-END
+
+**Objetivo:** Permitir definir horários específicos por dia trabalhado na criação/edição de funcionário.
+**Instruções:**
+
+1. Substituir inputs de hora que hoje usam number ou texto por inputs de tipo “time”.
+2. Quando o usuário marcar um dia em `workDays`, mostrar dois inputs (início/fim) pré-preenchidos com o padrão global.
+3. Ao desmarcar um dia, remover aquele bloco de horários do objeto temporário.
+4. No submit, construir `customSchedule` apenas com os dias que diferem (ou pode enviar todos os selecionados – mas não enviar dias não marcados).
+5. Testar com um funcionário que trabalha em dias alternados e verificar se são refletidos na escala.
+
+---
+
+## FASE 4 – NOVA ROTA PARA GERAÇÃO DE FINAIS DE SEMANA
+
+**Objetivo:** Substituir uso do gerador mensal total por um gerador só para sábados e domingos.
+**Instruções:**
+
+1. Criar rota protegida `POST /api/schedule/generate-weekends` que recebe `{ year, month }`.
+2. Lógica:
+
+   * Selecionar todos os funcionários ativos com `weekendRotation=true`.
+   * Iterar por todos os sábados e domingos do mês informado.
+   * Pular feriados.
+   * Para cada dia, limpar somente assignments existentes desses funcionários de rotação (não apagar os de outros que possam ficar).
+   * Atribuir um único funcionário por dia em ordem rotativa (ex: round-robin).
+3. Retornar quantos dias foram atribuídos.
+4. **Não** recriar ou mexer nos dias úteis; deixar como estão.
+5. Adicionar botão no front-end “Gerar Escala Fim de Semana” que chama essa rota e, ao terminar, faz refetch da agenda.
+
+---
+
+## FASE 5 – BOTÃO FRONT-END E REMOÇÃO DO GERADOR ANTIGO
+
+**Objetivo:** Alterar UI para refletir novo fluxo.
+**Instruções:**
+
+1. Remover/ocultar o botão antigo de “Gerar Escala” (mensal completa).
+2. Adicionar botão “Gerar Escala Fim de Semana” visível apenas a usuário autenticado.
+3. Ao clicar:
+
+   * Enviar ano e mês atualmente visualizados (garantir que a UI usa o mês correto do calendário real).
+   * Exibir feedback (loading / sucesso / erro).
+4. Atualizar a tela de agenda após sucesso.
+5. Confirmar que apenas sábados e domingos mudam.
+
+---
+
+## FASE 6 – DATA REAL NO CALENDÁRIO
+
+**Objetivo:** Garantir que o calendário exibe o mês e ano reais e pode navegar corretamente.
+**Instruções:**
+
+1. Verificar componente que mostra o mês; garantir que a fonte da data inicial é `new Date()` e não um valor fixo.
+2. Garantir que mudança de mês refaz a busca `GET /api/schedule/:year/:month`.
+3. Caso haja timezone issues, normalizar para UTC apenas na montagem das strings (YYYY-MM-DD).
+
+---
+
+## FASE 7 – AJUSTES DE HOLIDAY FORM (FRONT-END)
+
+**Objetivo:** Salvar sempre feriados como `MM-DD`.
+**Instruções:**
+
+1. Se o formulário usa `<input type="date">`, ao submeter, extrair substring mês-dia.
+2. Exibir apenas a parte dia/mês para o usuário na listagem (ano irrelevante).
+3. Testar criando feriado e conferindo se na resposta JSON vem sem ano.
+
+---
+
+## FASE 8 – MIGRAÇÃO DE DADOS (OPCIONAL MAS RECOMENDADO)
+
+**Objetivo:** Padronizar registros de feriados antigos.
+**Instruções:**
+
+1. Listar todos documentos de `holidays`.
+2. Para cada `date` no formato `YYYY-MM-DD`, atualizar para `MM-DD`.
+3. Registrar quantos foram alterados.
+
+---
+
+## FASE 9 – TESTES FUNCIONAIS
+
+**Testar Cenários:**
+
+1. Criar funcionário A (dias: seg/qua/sex). Verificar criação de assignments do dia atual até fim do mês nesses dias.
+2. Criar feriado recorrente (ex: 12-25). Verificar que nesse dia nenhum assignment é criado para novo funcionário criado após.
+3. Criar dois funcionários com `weekendRotation=true`. Gerar escala de fim de semana do mês atual. Confirmar alternância (ex: sáb A, dom B, sáb A, dom B ...).
+4. Editar horários customizados para um dia e garantir que a exibição muda na agenda.
+5. Deletar um funcionário e verificar se assignments dele NÃO são automaticamente removidos (aceitável a princípio — apenas observar; se quiser remoção, registrar como melhoria futura).
+6. Regenerar escala de fim de semana – confirmar que dias de semana permanecem intactos.
+
+---
+
+## FASE 10 – LOGS E ROBUSTEZ
+
+**Instruções:**
+
+1. Adicionar logs claros apenas em pontos críticos (criação de funcionário → “auto-schedule applied”, geração de rotação → “weekend rotation generated N days”).
+2. Em caso de erro ao auto-agendar, registrar warning mas não falhar a criação do funcionário.
+3. Verificar se as rotas retornam mensagens de erro JSON padronizadas (`{ message: "...", details?: ... }`).
+
+---
+
+## FASE 11 – RELATÓRIO FINAL
+
+Ao concluir:
+
+1. Listar arquivos modificados.
+2. Descrever brevemente cada alteração.
+3. Informar quantos feriados foram migrados (se fez migração).
+4. Confirmar sucesso de cada cenário de teste.
+
+---
+
+## CRITÉRIOS DE ACEITE
+
+* Feriados armazenados apenas como `MM-DD`.
+* Novo funcionário aparece automaticamente na agenda nos dias futuros corretos.
+* Botão “Gerar Escala Fim de Semana” funciona e só altera sábados/domingos com rotação entre marcados.
+* Inputs de horário por dia (custom) funcionando.
+* Antigo gerador mensal não visível ao usuário.
+* Sem erros não tratados no console do servidor durante operações normais.
+
+---
+
+**IMPORTANTE:**
+
+* Não introduzir dependências novas sem necessidade.
+* Não alterar regras de autenticação existentes.
+* Manter estilo de código consistente.
+* Caso encontre divergências de nomes de variáveis/componentes, adaptar mantendo a intenção descrita.
+
+---
+
+Execute estas fases em ordem, validando cada uma antes de seguir.
+Quando terminar, forneça o relatório final conforme a Fase 11.
+
+FIM DO PROMPT.
+
+

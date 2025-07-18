@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { useSchedule, useHolidays, useGenerateMonthlySchedule } from "@/hooks/useSchedule";
+import { useSchedule, useHolidays, useGenerateMonthlySchedule, useGenerateWeekendSchedule } from "@/hooks/useSchedule";
 import { useToast } from "@/hooks/use-toast";
 import DayEditModal from "@/components/modals/DayEditModal";
 import type { ScheduleEntry, Holiday } from "@shared/schema";
@@ -21,6 +21,7 @@ export default function SchedulePage() {
   const { data: scheduleEntries = [], isLoading: scheduleLoading } = useSchedule(year, month);
   const { data: holidays = [] } = useHolidays();
   const generateSchedule = useGenerateMonthlySchedule();
+  const generateWeekendSchedule = useGenerateWeekendSchedule();
 
   const formatMonthYear = (date: Date) => {
     return date.toLocaleDateString('pt-BR', { 
@@ -101,6 +102,25 @@ export default function SchedulePage() {
     }
   };
 
+  // PHASE 5: Weekend schedule generation handler
+  const handleGenerateWeekendSchedule = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await generateWeekendSchedule.mutateAsync({ year, month });
+      toast({
+        title: "Escala de fins de semana gerada",
+        description: `${result.daysGenerated} dias de fins de semana foram programados`,
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao gerar escala de fins de semana",
+        description: "Não foi possível gerar a escala de fins de semana",
+        variant: "destructive",
+      });
+    }
+  };
+
   const calendarDays = getCalendarDays();
 
   const getAssignmentColor = (index: number) => {
@@ -175,16 +195,28 @@ export default function SchedulePage() {
             </Button>
           </div>
 
-          {/* Generate Schedule Button (Admin Only) */}
-          {user && scheduleEntries.length === 0 && (
-            <Button
-              onClick={handleGenerateSchedule}
-              disabled={generateSchedule.isPending}
-              className="bg-brand hover:bg-brand-dark text-white"
-            >
-              <Plus className="mr-2" size={16} />
-              {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
-            </Button>
+          {/* Generate Schedule Buttons (Admin Only) */}
+          {user && (
+            <div className="flex space-x-2">
+              <Button
+                onClick={handleGenerateSchedule}
+                disabled={generateSchedule.isPending}
+                className="bg-brand hover:bg-brand-dark text-white"
+              >
+                <Calendar className="mr-2" size={16} />
+                {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
+              </Button>
+              {/* PHASE 5: Weekend schedule generation button */}
+              <Button
+                onClick={handleGenerateWeekendSchedule}
+                disabled={generateWeekendSchedule.isPending}
+                variant="outline"
+                className="border-brand text-brand hover:bg-brand hover:text-white"
+              >
+                <Plus className="mr-2" size={16} />
+                {generateWeekendSchedule.isPending ? "Gerando..." : "Fins de Semana"}
+              </Button>
+            </div>
           )}
         </div>
       </div>

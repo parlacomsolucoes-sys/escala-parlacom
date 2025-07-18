@@ -222,6 +222,39 @@ export function useGenerateMonthlySchedule() {
   });
 }
 
+// PHASE 5: Weekend schedule generation hook
+export function useGenerateWeekendSchedule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ year, month }: { year: number; month: number }) => {
+      const token = await getCurrentUserToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const response = await fetch("/api/schedule/generate-weekends", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ year, month }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/schedule", variables.year, variables.month],
+      });
+    },
+  });
+}
+
 export function useUpdateDaySchedule() {
   const queryClient = useQueryClient();
 

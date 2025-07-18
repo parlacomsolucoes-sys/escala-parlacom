@@ -27,23 +27,14 @@ export interface Employee extends InsertEmployee {
   updatedAt: string;
 }
 
-// Holiday schema - now supports recurrent holidays (MM-DD format)
-const baseHolidaySchema = z.object({
+// Holiday schema
+export const insertHolidaySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  date: z.string().regex(/^(\d{4}-)?(\d{2}-\d{2})$/, "Data deve estar no formato MM-DD ou YYYY-MM-DD"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato YYYY-MM-DD"),
   description: z.string().optional()
 });
 
-export const insertHolidaySchema = baseHolidaySchema.transform((data) => {
-  // Normalize date to MM-DD format (remove year if present)
-  const dateMatch = data.date.match(/^(\d{4}-)?(\d{2}-\d{2})$/);
-  if (dateMatch) {
-    data.date = dateMatch[2]; // Keep only MM-DD part
-  }
-  return data;
-});
-
-export const updateHolidaySchema = baseHolidaySchema.partial().extend({
+export const updateHolidaySchema = insertHolidaySchema.partial().extend({
   id: z.string()
 });
 
@@ -107,22 +98,10 @@ export function isWeekend(date: Date): boolean {
   return day === 0 || day === 6; // Sunday or Saturday
 }
 
-// Utility function to check if date is holiday (supports recurrent MM-DD format)
+// Utility function to check if date is holiday
 export function isHoliday(date: Date, holidays: Holiday[]): Holiday | undefined {
-  const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
-  const monthDay = dateString.substring(5); // MM-DD
-  
-  return holidays.find(holiday => {
-    // Support both old format (YYYY-MM-DD) and new format (MM-DD)
-    if (holiday.date.includes('-') && holiday.date.length === 5) {
-      // New format: MM-DD
-      return holiday.date === monthDay;
-    } else if (holiday.date === dateString) {
-      // Old format: YYYY-MM-DD
-      return true;
-    }
-    return false;
-  });
+  const dateString = date.toISOString().split('T')[0];
+  return holidays.find(holiday => holiday.date === dateString);
 }
 
 // Utility function to get week number

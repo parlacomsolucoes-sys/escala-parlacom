@@ -217,7 +217,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
                 <div>
                   <Label className="block text-xs text-gray-600 mb-1">Início</Label>
                   <Input
-                    type="text"
+                    type="time"
                     placeholder="08:00"
                     value={formData.defaultStartTime}
                     onChange={(e) => setFormData(prev => ({ ...prev, defaultStartTime: e.target.value }))}
@@ -226,7 +226,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
                 <div>
                   <Label className="block text-xs text-gray-600 mb-1">Fim</Label>
                   <Input
-                    type="text"
+                    type="time"
                     placeholder="18:00"
                     value={formData.defaultEndTime}
                     onChange={(e) => setFormData(prev => ({ ...prev, defaultEndTime: e.target.value }))}
@@ -258,7 +258,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
                           <div>
                             <Label className="block text-xs text-gray-600 mb-1">Início</Label>
                             <Input
-                              type="text"
+                              type="time"
                               placeholder={formData.defaultStartTime}
                               value={customTime?.startTime || ''}
                               onChange={(e) => handleCustomScheduleChange(day, 'startTime', e.target.value)}
@@ -268,7 +268,7 @@ export default function EmployeeModal({ isOpen, onClose, employee }: EmployeeMod
                           <div>
                             <Label className="block text-xs text-gray-600 mb-1">Fim</Label>
                             <Input
-                              type="text"
+                              type="time"
                               placeholder={formData.defaultEndTime}
                               value={customTime?.endTime || ''}
                               onChange={(e) => handleCustomScheduleChange(day, 'endTime', e.target.value)}
