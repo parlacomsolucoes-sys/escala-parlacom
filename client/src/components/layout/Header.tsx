@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Calendar, Users, Star, LogIn, LogOut } from "lucide-react";
+import { Calendar, Users, Star, LogIn, LogOut, Plane } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { logout } from "@/lib/auth";
@@ -55,6 +55,13 @@ export default function Header() {
                       : "text-gray-500 hover:text-gray-700"
                   }`}>
                     Feriados
+                  </Link>
+                  <Link href="/vacations" className={`px-3 py-2 text-sm font-medium transition-colors ${
+                    isActive("/vacations") 
+                      ? "text-brand border-b-2 border-brand" 
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}>
+                    Férias
                   </Link>
                 </div>
               </div>

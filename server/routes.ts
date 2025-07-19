@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { scheduleService } from "./services/scheduleService";
+import { vacationService } from "./services/vacationService";
 import { requireAuth, optionalAuth, type AuthenticatedRequest } from "./middleware/auth";
-import { insertEmployeeSchema, updateEmployeeSchema, insertHolidaySchema, generateMonthlyScheduleSchema, insertAssignmentSchema } from "@shared/schema";
+import { insertEmployeeSchema, updateEmployeeSchema, insertHolidaySchema, generateMonthlyScheduleSchema, insertAssignmentSchema, insertVacationSchema, updateVacationSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -135,6 +136,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Delete holiday error:", error);
       res.status(500).json({ 
         message: "Failed to delete holiday",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
+    }
+  });
+
+  // Vacation routes
+  app.get("/api/vacations", async (req, res) => {
+    try {
+      const year = parseInt(req.query.year as string);
+      const employeeId = req.query.employeeId as string;
+      
+      if (isNaN(year)) {
+        return res.status(400).json({ message: "Year parameter is required and must be a valid number" });
+      }
+      
+      const vacations = await vacationService.list(year, employeeId);
+      res.json(vacations);
+    } catch (error) {
+      console.error("Get vacations error:", error);
+      res.status(500).json({ 
+        message: "Failed to get vacations",
+        detail: error.message,
+        code: error.code || "UNKNOWN_ERROR"
+      });
+    }
+  });
+
+  app.post("/api/vacations", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const vacationData = insertVacationSchema.parse(req.body);
+      
+      // Get employee name
+      const employees = await scheduleService.getAllEmployees();
+      const employee = employees.find(emp => emp.id === vacationData.employeeId);
+      
+      if (!employee) {
+        return res.status(400).json({ message: "Funcionário não encontrado" });
+      }
+      
+      const vacation = await vacationService.create(vacationData, employee.name);
+      
+      // Invalidate cache for affected months
+      const startMonth = new Date(vacation.startDate).getMonth() + 1;
+      const endMonth = new Date(vacation.endDate).getMonth() + 1;
+      // TODO: Invalidate schedule cache for affected months
+      
+      res.status(201).json(vacation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Validation error", errors: error.errors });
+      } else {
+        console.error("Create vacation error:", error);
+        const statusCode = error.message.includes('conflita') ? 409 : 
+                          error.message.includes('atravessar') ? 400 : 500;
+        res.status(statusCode).json({ 
+          message: "Failed to create vacation",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
+      }
+    }
+  });
+
+  app.patch("/api/vacations/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { id } = req.params;
+      const updateData = updateVacationSchema.parse(req.body);
+      
+      const vacation = await vacationService.update(id, updateData);
+      
+      // TODO: Invalidate cache for affected months
+      
+      res.json(vacation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Validation error", errors: error.errors });
+      } else {
+        console.error("Update vacation error:", error);
+        const statusCode = error.message.includes('conflita') ? 409 : 
+                          error.message.includes('atravessar') ? 400 : 
+                          error.message.includes('não encontrado') ? 404 : 500;
+        res.status(statusCode).json({ 
+          message: "Failed to update vacation",
+          detail: error.message,
+          code: error.code || "UNKNOWN_ERROR"
+        });
+      }
+    }
+  });
+
+  app.delete("/api/vacations/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { id } = req.params;
+      await vacationService.remove(id);
+      
+      // TODO: Invalidate cache for affected months
+      
+      res.status(204).send();
+    } catch (error) {
+      console.error("Delete vacation error:", error);
+      const statusCode = error.message.includes('não encontrado') ? 404 : 500;
+      res.status(statusCode).json({ 
+        message: "Failed to delete vacation",
         detail: error.message,
         code: error.code || "UNKNOWN_ERROR"
       });

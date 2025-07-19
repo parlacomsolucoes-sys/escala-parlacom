@@ -15,9 +15,10 @@ interface DayEditModalProps {
   onClose: () => void;
   date: string;
   assignments: Assignment[];
+  onVacationEmployeeIds?: string[];
 }
 
-export default function DayEditModal({ isOpen, onClose, date, assignments }: DayEditModalProps) {
+export default function DayEditModal({ isOpen, onClose, date, assignments, onVacationEmployeeIds = [] }: DayEditModalProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: employees = [] } = useEmployees();
@@ -186,6 +187,26 @@ export default function DayEditModal({ isOpen, onClose, date, assignments }: Day
             </div>
           </div>
           
+          {/* Employees on Vacation */}
+          {onVacationEmployeeIds.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-lg font-semibold text-gray-900 mb-4">Funcionários em Férias</h4>
+              <div className="space-y-2">
+                {employees
+                  .filter(emp => onVacationEmployeeIds.includes(emp.id))
+                  .map((employee) => (
+                    <div key={employee.id} className="flex items-center p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="h-6 w-6 rounded-full bg-yellow-100 flex items-center justify-center mr-3">
+                        <User className="text-yellow-600" size={14} />
+                      </div>
+                      <span className="text-sm font-medium text-yellow-800">{employee.name}</span>
+                      <span className="text-xs text-yellow-600 ml-2">(em férias)</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+          
           {/* Add New Assignment (Admin Only) */}
           {user && (
             <div className="border-t pt-6">
@@ -204,11 +225,13 @@ export default function DayEditModal({ isOpen, onClose, date, assignments }: Day
                         <SelectValue placeholder="Selecionar..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {employees.filter(emp => emp.isActive).map((employee) => (
-                          <SelectItem key={employee.id} value={employee.id}>
-                            {employee.name}
-                          </SelectItem>
-                        ))}
+                        {employees
+                          .filter(emp => emp.isActive && !onVacationEmployeeIds.includes(emp.id))
+                          .map((employee) => (
+                            <SelectItem key={employee.id} value={employee.id}>
+                              {employee.name}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>

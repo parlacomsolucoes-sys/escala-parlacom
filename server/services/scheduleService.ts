@@ -11,6 +11,7 @@ import {
   generateETag
 } from "@shared/utils/schedule";
 import { normalizeTime } from "@shared/schema";
+import { vacationService } from "./vacationService";
 
 // In-memory cache for schedules
 const scheduleCache = new Map<string, { data: MonthlySchedule; etag: string; ts: number }>();
@@ -147,9 +148,10 @@ export class ScheduleService {
   }
 
   private async createMonthlySchedule(year: number, month: number): Promise<MonthlySchedule> {
-    // Load all holidays
+    // Load all holidays and vacation data
     const holidays = await this.getAllHolidays();
     const holidayMap = calcHolidayMap(holidays);
+    const vacationMap = await vacationService.getEmployeesOnVacationForMonth(year, month);
 
     // Generate all days for the month
     const monthDays = getMonthDays(year, month);
@@ -157,12 +159,14 @@ export class ScheduleService {
       const dateStr = formatDate(date);
       const weekend = isWeekend(date);
       const holiday = isHolidayDate(date, holidayMap);
+      const onVacationEmployeeIds = Array.from(vacationMap.get(dateStr) || []);
 
       return {
         date: dateStr,
         assignments: [],
         isWeekend: weekend,
-        isHoliday: holiday
+        isHoliday: holiday,
+        onVacationEmployeeIds: onVacationEmployeeIds.length > 0 ? onVacationEmployeeIds : undefined
       };
     });
 
@@ -217,26 +221,45 @@ export class ScheduleService {
 
     for (const day of monthlySchedule.days) {
       if (day.isWeekend && !day.isHoliday) {
-        const employee = weekendEmployees[currentIndex % weekendEmployees.length];
-        const date = new Date(day.date);
-        const weekdayIndex = date.getDay();
-        const times = pickEmployeeDefaultTimes(employee, weekdayIndex);
+        // Find next available employee (not on vacation)
+        let attempts = 0;
+        let employee = null;
+        
+        while (attempts < weekendEmployees.length) {
+          const candidateEmployee = weekendEmployees[currentIndex % weekendEmployees.length];
+          const isOnVacation = day.onVacationEmployeeIds?.includes(candidateEmployee.id) || false;
+          
+          if (!isOnVacation) {
+            employee = candidateEmployee;
+            break;
+          }
+          
+          currentIndex++;
+          attempts++;
+        }
+        
+        if (employee) {
+          const date = new Date(day.date);
+          const weekdayIndex = date.getDay();
+          const times = pickEmployeeDefaultTimes(employee, weekdayIndex);
 
-        // Remove existing weekend assignments and add new one
-        day.assignments = day.assignments.filter(a => 
-          !weekendEmployees.some(we => we.id === a.employeeId)
-        );
+          // Remove existing weekend assignments and add new one
+          day.assignments = day.assignments.filter(a => 
+            !weekendEmployees.some(we => we.id === a.employeeId)
+          );
 
-        day.assignments.push({
-          id: `${employee.id}-${day.date}`,
-          employeeId: employee.id,
-          employeeName: employee.name,
-          startTime: normalizeTime(times.startTime),
-          endTime: normalizeTime(times.endTime)
-        });
+          day.assignments.push({
+            id: `${employee.id}-${day.date}`,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            startTime: normalizeTime(times.startTime),
+            endTime: normalizeTime(times.endTime)
+          });
 
-        currentIndex++;
-        daysUpdated++;
+          currentIndex++;
+          daysUpdated++;
+        }
+        // If no employee available (all on vacation), skip this weekend day
       }
     }
 
@@ -288,6 +311,12 @@ export class ScheduleService {
       const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
       if (!timeRegex.test(assignment.startTime) || !timeRegex.test(assignment.endTime)) {
         throw new Error('Invalid time format');
+      }
+      
+      // Check if employee is on vacation for this date
+      const isOnVacation = await vacationService.isEmployeeOnVacation(assignment.employeeId, date);
+      if (isOnVacation) {
+        throw new Error('Funcionário em férias neste dia');
       }
     }
 

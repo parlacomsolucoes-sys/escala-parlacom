@@ -123,7 +123,8 @@ export const scheduleDaySchema = z.object({
   isHoliday: z.union([z.object({
     id: z.string(),
     name: z.string()
-  }), z.null()])
+  }), z.null()]),
+  onVacationEmployeeIds: z.array(z.string()).optional()
 });
 
 export const monthlyScheduleSchema = z.object({
@@ -144,6 +145,32 @@ export type MonthlySchedule = z.infer<typeof monthlyScheduleSchema>;
 
 // For backwards compatibility, ScheduleEntry now refers to a single day
 export type ScheduleEntry = ScheduleDay;
+
+// Vacation schema
+export const vacationSchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  employeeName: z.string(),
+  year: z.number(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),   // YYYY-MM-DD
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  notes: z.string().optional()
+});
+
+export const insertVacationSchema = vacationSchema.omit({
+  id: true,
+  employeeName: true,
+  year: true,
+  createdAt: true,
+  updatedAt: true
+});
+
+export const updateVacationSchema = insertVacationSchema.partial();
+
+export type Vacation = z.infer<typeof vacationSchema>;
+export type InsertVacation = z.infer<typeof insertVacationSchema>;
 
 // Utility function to normalize time format
 export function normalizeTime(time: string): string {

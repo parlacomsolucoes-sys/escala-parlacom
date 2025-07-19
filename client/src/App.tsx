@@ -8,6 +8,7 @@ import Header from "@/components/layout/Header";
 import SchedulePage from "@/pages/SchedulePage";
 import EmployeesPage from "@/pages/EmployeesPage";
 import HolidaysPage from "@/pages/HolidaysPage";
+import VacationsPage from "@/pages/VacationsPage";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -19,6 +20,7 @@ function Router() {
           <Route path="/" component={SchedulePage} />
           <Route path="/employees" component={EmployeesPage} />
           <Route path="/holidays" component={HolidaysPage} />
+          <Route path="/vacations" component={VacationsPage} />
           <Route component={NotFound} />
         </Switch>
       </main>

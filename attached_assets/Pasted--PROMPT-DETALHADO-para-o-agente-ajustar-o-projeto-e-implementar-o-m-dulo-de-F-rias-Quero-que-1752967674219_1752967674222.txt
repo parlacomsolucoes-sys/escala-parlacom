@@ -1,0 +1,290 @@
+**PROMPT DETALHADO (para o agente ajustar o projeto e implementar o módulo de Férias)**
+
+Quero que você implemente um **módulo completo de Férias de Funcionários** no projeto (monorepo React + Express + Firestore já reestruturado com documento mensal de schedule). **Não escreva explicações — apenas realize as mudanças solicitadas**. Abaixo estão os requisitos técnicos e funcionais.
+
+---
+
+### 1. Objetivo Geral
+
+* Registrar períodos de férias (“vacation periods”) por funcionário.
+* Um funcionário pode ter **vários períodos de férias no mesmo ano** (ex: 10/02–20/02 e 05/08–15/08).
+* Durante dias de férias o funcionário **não deve aparecer na escala** (nem ser escalado automaticamente em geração de finais de semana).
+* Criar **aba “Férias”** no frontend (sem remover as já existentes).
+* Possibilidade de CRUD de períodos de férias.
+* Se excluir um período de férias, aqueles dias voltam a poder ser escalados.
+* Não misturar férias com feriados (já existentes).
+
+---
+
+### 2. Modelo de Dados
+
+**Nova coleção Firestore**: `vacations` (coleção simples, não aninhada a monthly schedule).
+Cada documento:
+
+```
+{
+  id: string (doc id),
+  employeeId: string,
+  employeeName: string (capturado no momento da criação para exibição rápida),
+  year: number,
+  startDate: string (YYYY-MM-DD),
+  endDate: string (YYYY-MM-DD),
+  createdAt: string (ISO),
+  updatedAt: string (ISO),
+  notes?: string
+}
+```
+
+**Índices recomendados** (se for usar regras / consultas com filtros):
+
+* Composite: employeeId + year
+* Simple: year
+  (Se Firestore rules exigirem, preparar consultas com `where('year','==',currentYear)`.)
+
+---
+
+### 3. Integração com a Lógica de Escala
+
+A lógica atual armazena um documento por mês com os dias. Ajustes:
+
+1. Na geração de escala de fins de semana (e/ou mensal se ainda existir):
+
+   * Antes de concatenar candidatos, filtrar os funcionários que **não estejam de férias** naquele(s) dia(s).
+2. Ao atualizar manualmente um dia com assignments:
+
+   * Se o usuário tentar adicionar um funcionário que está de férias naquele dia → rejeitar com erro 400 (“Funcionário em férias neste dia”).
+3. Ao obter `/api/schedule/:year/:month` incluir em cada dia uma flag adicional opcional:
+
+   * `onVacationEmployeeIds: string[]` (ids de funcionários que estariam ativos mas estão de férias)
+   * **Não** escalar esses ids nos assignments gerados automaticamente.
+4. Não remover dados históricos de férias de anos anteriores; apenas ignorar quando o `year` não bate com a consulta.
+
+---
+
+### 4. Endpoints REST (backend)
+
+Base: `/api/vacations`
+
+| Método | Rota                       | Descrição                                                                                                            |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/vacations?year=YYYY` | Lista todos os períodos de férias do ano; suporta opcional `employeeId` (`/api/vacations?year=2025&employeeId=abc`). |
+| POST   | `/api/vacations`           | Cria período de férias.                                                                                              |
+| PATCH  | `/api/vacations/:id`       | Atualiza período (apenas start/end/notes).                                                                           |
+| DELETE | `/api/vacations/:id`       | Remove período.                                                                                                      |
+
+**Regras / validações** (no POST/PATCH):
+
+* `startDate <= endDate`
+* Datas no formato YYYY-MM-DD.
+* `year` deve ser derivado de `startDate.getFullYear()` (e exigir que start e end estejam no mesmo ano para simplificar v1). Se usuário tentar período cruzando ano → retornar 400 (“Período não pode cruzar ano — criar dois registros”).
+* Checar sobreposição: impedir dois períodos para mesmo employee que se sobreponham (comparar intervalos). Se houver overlap → 409 conflito.
+* Registrar timestamps.
+
+**Resposta GET**: array ordenada por `startDate ASC`.
+
+---
+
+### 5. Ajustes Internos no Código
+
+1. **shared/schema.ts**:
+
+   * Adicionar tipos `Vacation` e `InsertVacation`.
+2. **Novo service** `server/services/vacationService.ts`:
+
+   * Métodos: `list(year, employeeId?)`, `create(data)`, `update(id, partial)`, `remove(id)`, `isEmployeeOnVacation(employeeId, dateString)` (helper), `getEmployeesOnVacationForMonth(year, month)` (retornar map `dateString -> Set<employeeId>`).
+3. **scheduleService.ts**:
+
+   * Ao montar o objeto mensal, chamar `vacationService.getEmployeesOnVacationForMonth(year, month)` e para cada dia:
+
+     * Adicionar campo `onVacationEmployeeIds` (array ordenada).
+     * Ao gerar assignments automáticos ignorar esses funcionários.
+4. **Rotas (`server/routes.ts`)**:
+
+   * Adicionar grupo `/api/vacations`.
+   * Proteger POST/PATCH/DELETE via autenticação (mesma lógica de employees). GET público (ou protegido, se padrão do app).
+5. **Validação**: Utilizar zod (se já usado) ou validação manual coerente com esquema.
+6. **Cache**: Se o schedule usa cache/ETag, invalidar ou “bust” quando criar/editar/remover férias que atinjam o mês carregado (ex: ao criar férias em julho, invalidar cache de `schedule:2025-07`).
+7. **Performance**:
+
+   * Carregar férias mensais uma única vez por geração de schedule (não por dia).
+   * Overlap check eficiente: query vacations por `employeeId` e `year`, depois filtrar in-memory.
+
+---
+
+### 6. Frontend – Nova Aba “Férias”
+
+**Rota**: `/vacations` (adicionar no Header).
+
+**Página VacationsPage**:
+
+* Título: “Férias de Funcionários”.
+* Filtros:
+
+  * Selecionar ano (default: ano atual).
+  * (Opcional) filtro por funcionário.
+* Botão “Nova Férias” (abre modal).
+* Tabela/Lista: Colunas: Funcionário | Período (DD/MM a DD/MM) | Dias corridos | Observações | Ações (Editar / Excluir).
+* Ordenado por `startDate`.
+
+**Modal Criação/Edição**:
+Campos:
+
+* Funcionário (select – apenas ativos).
+* Data início (date).
+* Data fim (date).
+* Observações (textarea opcional).
+  Validações imediatas:
+* Fim >= início
+* Mesmo ano
+* Mostrar aviso se conflitar com outro período (requisição prévia GET local filtrada)
+
+**Feedback**: toast sucesso/erro como restante do app.
+
+---
+
+### 7. Integração com Calendário (SchedulePage)
+
+1. Ao montar `calendarDays` / `weekDays` / `dayData`, se o dia tiver `onVacationEmployeeIds` não vazia:
+
+   * Exibir indicador (ex: badge pequena “Férias” com contador).
+   * No modal DayEditModal:
+
+     * Quando listar funcionários no select de adicionar escala, **desabilitar** (ou ocultar) aqueles em férias nesse dia (mostrar tooltip “Em férias”).
+2. Se todos os assignments removidos por férias (ex: período futuro), simplesmente mostrar vazio.
+
+---
+
+### 8. Ajustes no DayEditModal
+
+* Adicionar exibição de bloco “Funcionários em Férias neste Dia” com nomes (consulta cross: mapear IDs -> nomes via employees list).
+* Evitar permitir submit se tentativa de adicionar um desses nomes (bloquear no frontend também).
+
+---
+
+### 9. Hooks Frontend
+
+Criar em `client/src/hooks/useVacations.ts` (similar a `useSchedule.tsx`):
+
+* `useVacations(year, employeeId?)`
+* `useCreateVacation()`
+* `useUpdateVacation()`
+* `useDeleteVacation()`
+
+Todos utilizando o helper `api`. Invalidation:
+
+* Invalidate `[ "/api/vacations", year ]`
+* Invalidate schedule query `[ "/api/schedule", year, month ]` se alteração impactar mês(es). (Derivar meses entre startDate e endDate — como restringimos a um único ano, mês inicial até final).
+
+---
+
+### 10. Regras de Negócio Extras
+
+* Overlap permitido para **empregados diferentes**.
+* Não permitir que férias caiam em datas anteriores a hoje? (Deixar **permitido** para ajustes retroativos — não bloquear.)
+* Caso período seja criado e já existam assignments para aqueles dias → opção v1: simplesmente manter assignments existentes (mas eles não devem ser exibidos no calendário se o backend filtrar). **Implementar remoção automática dos assignments existentes desse funcionário** nos dias impactados para consistência:
+
+  * Ao criar férias: loop pelos dias do período → remover assignments daquele employee nas estruturas mensais correspondentes → salvar monthly doc(s).
+  * Ao editar férias (mudança de intervalo):
+
+    * Restaurar assignments antigos? **Não** (simplificar). Registrar somente o novo recorte (remover assignments adicionais).
+  * Ao deletar férias: **Não** recriar assignments automaticamente (admin poderá reatribuir manualmente).
+
+---
+
+### 11. Atualização do Monthly Schedule Document
+
+No documento mensal já existente (contendo array de dias):
+
+* Adicionar (se ainda não existir) a chave `onVacationEmployeeIds` em cada dia (array).
+* Cada write de férias chama rotina `recalculateVacationOverlay(year, month)` que:
+
+  * Carrega monthly doc
+  * Reconstroi arrays `onVacationEmployeeIds` conforme viagens no intervalo
+  * Salva somente se houve alteração (evitar writes redundantes)
+* Geração automática (weekend) ignora estes IDs.
+
+---
+
+### 12. Segurança / Regras (se aplicável)
+
+Se tiver regras Firestore personalizadas, ajustar para permitir CRUD em `vacations` apenas para usuários autenticados admin (seguir mesmo critério aplicado hoje para employees). Caso a camada seja só via backend admin + token, basta manter validação server-side.
+
+---
+
+### 13. Testes Manuais a Executar (Checklist Interno)
+
+1. Criar funcionário A e B.
+2. Criar férias de A (05/08–10/08).
+3. Gerar escala de finais de semana que inclua 09/08–10/08 → A não deve entrar, B pode.
+4. Tentar adicionar manualmente A em 06/08 via modal → erro.
+5. Ver aba “Férias” listar período corretamente.
+6. Criar segundo período de A no mesmo ano (15/11–20/11) → deve aparecer os dois na mesma listagem.
+7. Editar período (alterar fim) e conferir que `onVacationEmployeeIds` é refletido.
+8. Excluir período e verificar que dia volta a permitir adicionar A.
+
+---
+
+### 14. Performance / Cache
+
+* Reaproveitar mecanismo de cache existente (TTL/ETag).
+* Invalidação: alterações em férias de um mês devem invalidar ETag daquele monthly schedule.
+
+---
+
+### 15. UX / UI
+
+* Página “Férias” acessível no mesmo menu (Header) com destaque quando ativo.
+* Botão “Nova Férias” similar ao de “Novo Funcionário”.
+* Badges:
+
+  * No calendário mensal: pequena badge no canto inferior direito da célula (ex: “Férias: 2”) se houver mais de um em férias.
+  * Tooltip listando nomes (primeiros 3 + “+N”).
+
+---
+
+### 16. Não Quebrar Funcionalidades Atuais
+
+* Employees CRUD continua inalterado.
+* Holidays continuam funcionando (não confundir com vacations).
+* Geração de finais de semana preserva lógica de revezamento já implementada, só filtrando férias.
+
+---
+
+### 17. Organização de Arquivos
+
+* `shared/schema.ts`: adicionar tipos
+* `shared/utils/schedule.ts` (caso precise helpers extras)
+* `server/services/vacationService.ts`
+* `client/src/hooks/useVacations.ts`
+* `client/src/pages/VacationsPage.tsx`
+* `client/src/components/modals/VacationModal.tsx` (criação/edição)
+
+---
+
+### 18. Mensagens de Erro Padrão
+
+* Overlap: `"Período de férias conflita com outro período existente para este funcionário"`
+* Cross-year: `"Período de férias não pode atravessar anos. Divida em dois registros."`
+* Employee inexistente: `"Funcionário não encontrado"`
+* Funcionário em férias ao tentar escalar: `"Funcionário em férias neste dia"`
+
+---
+
+### 19. Internacionalização
+
+Seguir padrão atual (pt-BR) em labels e toasts.
+
+---
+
+### 20. Entregáveis Finais Esperados
+
+* Código ajustado conforme estrutura descrita.
+* Endpoint `/api/vacations` operante.
+* Página /vacations acessível e funcional.
+* Calendar exibindo badges de férias.
+* Não escalar funcionário em férias.
+* Remoção de assignments do funcionário ao criar período de férias futuro/atual.
+
+---
+
+**Execute agora todas as implementações descritas acima.**
