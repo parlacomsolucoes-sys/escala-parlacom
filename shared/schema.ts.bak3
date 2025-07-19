@@ -107,43 +107,20 @@ export const generateMonthlyScheduleSchema = z.object({
 
 export type GenerateMonthlyScheduleRequest = z.infer<typeof generateMonthlyScheduleSchema>;
 
-// New consolidated monthly schedule schema
-export const assignmentSchema = z.object({
-  id: z.string(),
-  employeeId: z.string(),
-  employeeName: z.string(),
-  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), // HH:MM format
-  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+// Weekend Rotation Metadata schema
+export const rotationMetaSchema = z.object({
+  rotationIndex: z.number().default(0),
+  swapParity: z.number().min(0).max(1).default(0),
+  lastProcessedWeekendISO: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string()
 });
 
-export const scheduleDaySchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD
-  assignments: z.array(assignmentSchema),
-  isWeekend: z.boolean(),
-  isHoliday: z.union([z.object({
-    id: z.string(),
-    name: z.string()
-  }), z.null()])
-});
+export type RotationMeta = z.infer<typeof rotationMetaSchema>;
 
-export const monthlyScheduleSchema = z.object({
-  year: z.number(),
-  month: z.number().min(1).max(12),
-  days: z.array(scheduleDaySchema),
-  rotationState: z.object({
-    lastWeekendIndex: z.number()
-  }).optional(),
-  generatedAt: z.string(),
-  updatedAt: z.string(),
-  version: z.number().default(1)
-});
-
-export type Assignment = z.infer<typeof assignmentSchema>;
-export type ScheduleDay = z.infer<typeof scheduleDaySchema>;
-export type MonthlySchedule = z.infer<typeof monthlyScheduleSchema>;
-
-// For backwards compatibility, ScheduleEntry now refers to a single day
-export type ScheduleEntry = ScheduleDay;
+export interface RotationMetaDoc extends RotationMeta {
+  id: string; // Format: YYYY-MM
+}
 
 // Utility function to normalize time format
 export function normalizeTime(time: string): string {

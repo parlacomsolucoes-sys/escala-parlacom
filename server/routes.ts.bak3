@@ -11,7 +11,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Employee routes
   app.get("/api/employees", async (req, res) => {
     try {
-      const employees = await scheduleService.getAllEmployees();
+      const employees = await storage.getEmployees();
       res.json(employees);
     } catch (error) {
       console.error("Get employees error:", error);
@@ -32,7 +32,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("[POST /api/employees] Dados validados:", JSON.stringify(employeeData, null, 2));
       
       console.log("[Firestore] Tentando criar employee...");
-      const employee = await scheduleService.createEmployee(employeeData);
+      const employee = await storage.createEmployee(employeeData);
       console.log("[POST /api/employees] Employee criado com sucesso:", employee.id);
       
       res.status(201).json(employee);
@@ -61,7 +61,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const updateData = updateEmployeeSchema.omit({ id: true }).parse(req.body);
-      const employee = await scheduleService.updateEmployee(id, updateData);
+      const employee = await storage.updateEmployee(id, updateData);
       res.json(employee);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -80,7 +80,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/employees/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const { id } = req.params;
-      await scheduleService.deleteEmployee(id);
+      await storage.deleteEmployee(id);
       res.status(204).send();
     } catch (error) {
       console.error("Delete employee error:", error);
@@ -95,7 +95,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Holiday routes
   app.get("/api/holidays", async (req, res) => {
     try {
-      const holidays = await scheduleService.getAllHolidays();
+      const holidays = await storage.getHolidays();
       res.json(holidays);
     } catch (error) {
       console.error("Get holidays error:", error);
@@ -110,7 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/holidays", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const holidayData = insertHolidaySchema.parse(req.body);
-      const holiday = await scheduleService.createHoliday(holidayData);
+      const holiday = await storage.createHoliday(holidayData);
       res.status(201).json(holiday);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -129,7 +129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/holidays/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const { id } = req.params;
-      await scheduleService.deleteHoliday(id);
+      await storage.deleteHoliday(id);
       res.status(204).send();
     } catch (error) {
       console.error("Delete holiday error:", error);
@@ -141,36 +141,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Schedule routes - NEW: Monthly consolidated approach
+  // Schedule routes
   app.get("/api/schedule/:year/:month", async (req, res) => {
     try {
       const year = parseInt(req.params.year);
       const month = parseInt(req.params.month);
-      const forceRegenerate = req.query.forceRegenerate === 'true';
       
       if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
         return res.status(400).json({ message: "Invalid year or month" });
       }
 
-      const etag = req.headers['if-none-match'];
-      
-      try {
-        const result = await scheduleService.getScheduleForMonth(year, month, etag, forceRegenerate);
-        
-        // Set ETag for caching
-        res.set('ETag', result.etag);
-        res.set('Cache-Control', 'private, max-age=60');
-        
-        // Log cache performance
-        console.log(`[SCHEDULE] GET ${year}-${month}: ${result.fromCache ? 'CACHE HIT' : 'CACHE MISS'}`);
-        
-        res.json(result.schedule);
-      } catch (error) {
-        if (error.message === 'NOT_MODIFIED') {
-          return res.status(304).send();
-        }
-        throw error;
-      }
+      const schedule = await scheduleService.getMonthlySchedule(year, month);
+      res.json(schedule);
     } catch (error) {
       console.error("Get schedule error:", error);
       res.status(500).json({ 
@@ -181,27 +163,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // NEW: Weekend schedule generation with monthly rotation
+  // PHASE 2: Weekend schedule generation route with idempotency
   app.post("/api/schedule/generate-weekends", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       console.log(`[WEEKEND] Received request:`, req.body);
-      const { year, month } = req.body;
+      const { year, month, force = false } = req.body;
       
       // Validate parameters
       if (!year || !month || isNaN(year) || isNaN(month) || month < 1 || month > 12) {
         return res.status(400).json({ 
           message: "Invalid parameters", 
+          stage: "validation",
           errorId: "INVALID_PARAMS" 
         });
       }
       
-      console.log(`[WEEKEND] Starting weekend generation for ${month}/${year}`);
+      console.log(`[WEEKEND] Starting weekend generation for ${month}/${year}, force=${force}`);
       
-      const result = await scheduleService.generateWeekendSchedule(year, month);
+      const result = await scheduleService.generateWeekendSchedule(year, month, force);
       
-      console.log(`[WEEKEND] ✅ Generated: ${result.daysUpdated} days updated`);
+      if (result.eligibleEmployees === 0) {
+        return res.status(422).json({
+          message: "No employees available for weekend rotation",
+          stage: "employee_check",
+          errorId: "NO_WEEKEND_EMPLOYEES"
+        });
+      }
       
-      res.status(201).json(result);
+      console.log(`[WEEKEND] ✅ Generated: ${result.daysGenerated} days, changed: ${result.changedCount}`);
+      
+      res.status(201).json({ 
+        message: "Weekend schedule generated successfully",
+        daysGenerated: result.daysGenerated,
+        changedCount: result.changedCount,
+        skippedHolidays: result.skippedHolidays,
+        eligibleEmployees: result.eligibleEmployees,
+        totalWeekendDaysProcessed: result.totalWeekendDaysProcessed,
+        employeesUsed: result.employeesUsed,
+        month,
+        year,
+        wasIdempotent: result.changedCount === 0
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -210,6 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(500).json({ 
           message: "Failed to generate weekend schedule",
           detail: error.message,
+          stage: "execution",
           errorId: "EXECUTION_ERROR"
         });
       }

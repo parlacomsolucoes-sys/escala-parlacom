@@ -1,0 +1,273 @@
+Segue um **prompt completo, técnico e sequenciado** para você entregar ao Replit Ghostwriter (ou outra IA de codificação) a fim de **refatorar seu backend e frontend** para a nova estrutura otimizada **(1 doc por mês em `schedules/{YYYY-MM}`)**, com geração/edição de escala, revezamento de finais de semana e suporte a feriados recorrentes (MM-DD).
+
+Copie e cole exatamente (ajuste apenas nomes se quiser):
+
+---
+
+**PROMPT PARA REPLIT – REESTRUTURAÇÃO COMPLETA DA ESCALA (ONE DOC / MONTH)**
+
+Contexto:
+
+* Projeto atual: Express + Firebase Admin + React (Vite) + Firestore.
+* Vou **apagar os dados antigos** (coleções diárias antigas) e recriar tudo seguindo a nova modelagem.
+* Objetivo: Melhor performance e menos round-trips. Escala mensal consolidada em um único documento `schedules/{YYYY-MM}`.
+* Front já faz chamadas para `/api/employees`, `/api/holidays`, `/api/schedule/:year/:month`, `/api/schedule/generate-weekends`, `/api/schedule/day/:date`.
+* Ajustar backend + adaptar frontend onde necessário para usar novo shape.
+* Regras: Feriados recorrentes armazenados somente como `date: "MM-DD"` ou campos `month`, `day`. Schedule embute flag de feriado e fim de semana.
+
+### 1. Modelagem Firestore Nova
+
+Coleções e documentos:
+
+```
+employees/{employeeId} {
+  name: string
+  workDays: string[]      // ['monday',...]
+  defaultStartTime: string // "08:00"
+  defaultEndTime: string   // "18:00"
+  customSchedule?: { [weekday: string]: { startTime: string, endTime: string } }
+  weekendRotation: boolean
+  isActive: boolean
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+holidays/{id} {
+  name: string
+  date: string   // "MM-DD"
+  description?: string
+  month: number  // redundante para filtros
+  day: number
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+schedules/{year-month}  // ex: "2025-07"
+{
+  year: number
+  month: number
+  days: [
+    {
+      date: "YYYY-MM-DD",
+      assignments: [
+        {
+          id: string,
+          employeeId: string,
+          employeeName: string,
+          startTime: string, // "HH:MM"
+          endTime: string
+        }
+      ],
+      isWeekend: boolean,
+      isHoliday: { id: string, name: string } | null
+    },
+    ...
+  ],
+  rotationState?: {
+    lastWeekendIndex: number // ou outro controle simples
+  },
+  generatedAt: string (ISO),
+  updatedAt: string (ISO),
+  version: 1
+}
+```
+
+### 2. Rotas Backend a (Re)Implementar
+
+1. **GET /api/employees** – lista todos.
+
+2. **POST /api/employees** – cria.
+
+3. **PATCH /api/employees/\:id** – atualiza.
+
+4. **DELETE /api/employees/\:id** – remove.
+
+5. **GET /api/holidays** – retorna todos os feriados (ordenar por month, day).
+
+6. **POST /api/holidays** – recebe `{ name, date: "MM-DD" | "YYYY-MM-DD", description? }`
+
+   * Normalizar: se vier `YYYY-MM-DD`, extrair substring(5) para `MM-DD`.
+   * Preencher `month` e `day`.
+
+7. **DELETE /api/holidays/\:id** – remove.
+
+8. **GET /api/schedule/\:year/\:month**
+
+   * `month` é 1–12.
+   * Constrói docId = `${year}-${String(month).padStart(2,'0')}`
+   * Tenta `get` em `schedules/docId`.
+   * Se NÃO existir:
+
+     * Carregar feriados (todos).
+     * Montar array `days` de todos os dias do mês:
+
+       * Para cada dia: calcular `isWeekend` (0 Domingo, 6 Sábado), `isHoliday` (match com `MM-DD`).
+       * `assignments: []`.
+     * Salvar doc com `generatedAt`, `updatedAt`.
+   * Retornar doc (sem modificação).
+   * **Adicionar** pequena lógica de cache em memória (Map) por 60s (não obrigatório mas recomendado).
+   * ETag: gerar hash SHA1 do JSON (string) e se `If-None-Match` bater, devolver 304.
+
+9. **POST /api/schedule/generate-weekends**
+
+   * Body: `{ year, month }`.
+   * Carregar doc (criar se não existir, reutilizando lógica GET).
+   * Listar employees com `weekendRotation=true` e `isActive=true`, ordenados por `name` (para consistência).
+   * Iterar pelos dias do mês; para cada Sábado e Domingo:
+
+     * Calcular índice base (ex: usar contador `weekendCursor` persistido em `rotationState.lastWeekendIndex`).
+     * Sábado: pegar employee index atual; Domingo: próximo (ou mesmo dependendo da regra definida).
+     * Se já houver assignments no dia, substituir apenas se vazio OU sobrescrever sempre (especificar: sobrescreva).
+     * Criar assignment com horários padrão daquele funcionário (ver customSchedule se dia da semana tiver override).
+   * Atualizar `rotationState.lastWeekendIndex`.
+   * Salvar doc.
+   * Retornar `{ message, daysUpdated, rotationState }`.
+
+10. **PATCH /api/schedule/day/\:date**
+
+    * `date` formato `YYYY-MM-DD`.
+    * Derivar `year-month` docId.
+    * Carregar doc, localizar o objeto no array `days`.
+    * Validar que `assignments` recebidos possuem campos obrigatórios.
+    * Substituir `days[index].assignments`.
+    * Atualizar `updatedAt`.
+    * Salvar doc.
+    * Retornar o dia atualizado ou o doc inteiro (retornar só o dia é mais eficiente).
+
+### 3. Funções Utilitárias Necessárias
+
+* `isWeekend(dateObj: Date)` retorna boolean.
+* `formatDate(dateObj)` para `YYYY-MM-DD`.
+* `getMonthDays(year, month)` devolve array de dates.
+* `normalizeHolidayInput(dateStr)` converte para `MM-DD`.
+* `calcHolidayMap(holidays)` → objeto `{ "MM-DD": { id, name } }`.
+* `pickEmployeeDefaultTimes(employee, weekdayIndex)`:
+
+  * Verifica `customSchedule[weekdayName]` senão usa `defaultStartTime`/`defaultEndTime`.
+
+### 4. Ajustes no Frontend
+
+* O frontend já chama `/api/schedule/:year/:month` e espera lista de days com `assignments`. **Manter shape atual**. Certificar se interface `ScheduleEntry` (ou equivalente) agora representa **um dia** (cada item do array `days`). No código atual `useSchedule` assume array de `ScheduleEntry[]`; manter isso.
+* Garantir que ao adicionar/editar dia use `PATCH /api/schedule/day/:date` com o array completo de assignments.
+
+### 5. Tipos Compartilhados
+
+Atualizar `@shared/schema`:
+
+```ts
+export interface Assignment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  startTime: string; // HH:MM
+  endTime: string;
+}
+
+export interface ScheduleDay {
+  date: string; // YYYY-MM-DD
+  assignments: Assignment[];
+  isWeekend: boolean;
+  isHoliday: { id: string; name: string } | null;
+}
+
+export interface MonthlySchedule {
+  year: number;
+  month: number;
+  days: ScheduleDay[];
+  rotationState?: { lastWeekendIndex: number };
+  generatedAt: string;
+  updatedAt: string;
+  version: number;
+}
+```
+
+Frontend continua usando `ScheduleEntry = ScheduleDay`.
+
+### 6. Cache em Memória (Backend)
+
+Simples:
+
+```ts
+const scheduleCache = new Map<string, { data: MonthlySchedule; etag: string; ts: number }>();
+const CACHE_TTL_MS = 60_000;
+```
+
+Na GET:
+
+* Se existe e `Date.now() - ts < TTL` → usar.
+* Gerar `etag = '"' + sha1(jsonString) + '"'`.
+* Comparar cabeçalho `If-None-Match`.
+
+### 7. CORS
+
+Manter implementação atual, apenas garantir que:
+
+* Em produção, origin callback trate trailing slashes (normalizar removendo `/` final).
+* Permitir também `OPTIONS` mesmo se origem não bater (responder 403 só depois?) – ou simplificar aceitando todas as origins conhecidas.
+
+### 8. Erros & Respostas
+
+Padrão JSON para erro: `{ message: string }`.
+Garantir que no `catch` de cada rota retorne status adequado:
+
+* 400 para input inválido
+* 404 se `date` não encontrado
+* 500 fallback
+
+### 9. Passos que o Agente Deve Executar Agora
+
+1. Criar/atualizar tipos em `@shared/schema`.
+2. Implementar utilitários novos (arquivo `shared/utils/schedule.ts`).
+3. Refatorar rotas de schedule:
+
+   * GET (dual create)
+   * POST `/generate-weekends`
+   * PATCH `/day/:date`
+4. Ajustar rota antiga `/api/schedule/generate` (mensal completo) para:
+
+   * Ou remover
+   * Ou delegar para simplesmente forçar recriação do doc (limpar assignments e regenerar dias).
+5. Atualizar frontend somente se for necessário (talvez nenhum ajuste).
+6. Testar local:
+
+   * Criar 2 employees (um com `weekendRotation=true`, outro também).
+   * Criar 2 feriados (`"09-07"`, `"12-25"`).
+   * GET mês.
+   * POST generate-weekends.
+   * PATCH um dia alterando assignments manualmente.
+7. Fazer deploy.
+
+### 10. Critérios de Aceite
+
+* GET `.../api/schedule/2025/7` primeira vez: cria doc e retorna.
+* Segunda vez: (log mostra cache HIT se implementar).
+* POST generate-weekends popula sábados/domingos com alternância.
+* PATCH day substitui assignments.
+* Feriados aparecem em `isHoliday` dos dias correspondentes (qualquer ano).
+* Performance: requisição schedule < 120ms local após cache (não medir build dev).
+
+### 11. Extras (Opcional)
+
+* Adicionar query param `?forceRegenerate=true` em GET para ignorar cache e reconstruir.
+* Registrar métricas simples (console): `schedule_miss`, `schedule_hit`.
+* Validar formato HH\:MM com regex `^([01]\d|2[0-3]):[0-5]\d$`.
+
+### 12. NÃO Fazer
+
+* Não implementar subcoleções de dias.
+* Não alterar contratos de employees/holidays.
+* Não introduzir dependências novas pesadas.
+
+---
+
+**IMPORTANTE**: Após concluir, me devolver:
+
+* Confirmação dos arquivos alterados.
+* Exemplo do documento salvo em `schedules/AAAA-MM`.
+* Logs de primeira e segunda chamada GET.
+
+---
+
+*Fim do prompt.*
+
+Use isso diretamente. Se quiser depois um script de migração legacy, peço em outro prompt. Boa refatoração!
