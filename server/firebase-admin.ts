@@ -1,44 +1,49 @@
+// server/firebase-admin.ts
 import "dotenv/config";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
+const required = [
+  "FIREBASE_PROJECT_ID",
+  "FIREBASE_CLIENT_EMAIL",
+  "FIREBASE_PRIVATE_KEY",
+] as const;
+
+const missing = required.filter((k) => !process.env[k]);
+if (missing.length) {
+  throw new Error("[firebase-admin] Variáveis ausentes: " + missing.join(", "));
+}
+
+// --- Normalização da PRIVATE KEY ---
+let rawKey = process.env.FIREBASE_PRIVATE_KEY!;
+
+// Se vier com aspas (ex: replit colou com "...")
 if (
-  !process.env.FIREBASE_PROJECT_ID ||
-  !process.env.FIREBASE_CLIENT_EMAIL ||
-  !process.env.FIREBASE_PRIVATE_KEY
+  (rawKey.startsWith('"') && rawKey.endsWith('"')) ||
+  (rawKey.startsWith("'") && rawKey.endsWith("'"))
 ) {
-  throw new Error("Variáveis FIREBASE_* ausentes");
+  rawKey = rawKey.slice(1, -1);
 }
 
-// Fix common issues with Firebase private key formatting
-let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+// Troca \\n (literais) por quebras reais
+rawKey = rawKey.replace(/\\n/g, "\n").trim();
 
-// Handle potential JSON escaped newlines and quotes
-if (privateKey.includes('\\n')) {
-  privateKey = privateKey.replace(/\\n/g, '\n');
-}
-
-// Remove extra quotes that might be present
-if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
-  privateKey = privateKey.slice(1, -1);
-}
-
-// Ensure the key starts and ends with the proper PEM markers
-if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-  console.error("[Firebase] ❌ Private key seems malformed - missing PEM headers");
-  console.error("[Firebase] Key starts with:", privateKey.substring(0, 50) + "...");
+// Opcional: avisar se parece incorreta
+if (
+  !rawKey.includes("BEGIN PRIVATE KEY") ||
+  !rawKey.includes("END PRIVATE KEY")
+) {
+  console.warn(
+    "[firebase-admin] ⚠️ A chave privada não contém os marcadores PEM esperados.",
+  );
 }
 
 const serviceAccount = {
-  project_id: process.env.FIREBASE_PROJECT_ID,
-  client_email: process.env.FIREBASE_CLIENT_EMAIL,
-  private_key: privateKey,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: rawKey,
 };
-
-console.log("[Firebase] Initializing with project:", process.env.FIREBASE_PROJECT_ID);
-console.log("[Firebase] Client email:", process.env.FIREBASE_CLIENT_EMAIL);
-console.log("[Firebase] Private key length:", privateKey.length);
 
 const app =
   getApps().length === 0
