@@ -192,7 +192,7 @@ export class ScheduleService {
     );
     const employees = await this.getAllEmployees();
 
-    console.log("🎯 Total de funcionários ativos:", employees.length);
+    console.log("🎯 Funcionários ativos encontrados:", employees.length);
 
     const monthDays = getMonthDays(year, month);
 
@@ -202,26 +202,22 @@ export class ScheduleService {
       const holiday = isHolidayDate(date, holidayMap);
       const onVacationEmployeeIds = Array.from(vacationMap.get(dateStr) || []);
 
-      const base: any = {
+      return {
         date: dateStr,
-        assignments: [] as Assignment[],
+        assignments: [],
         isWeekend: weekend,
         isHoliday: holiday,
+        ...(onVacationEmployeeIds.length > 0 ? { onVacationEmployeeIds } : {}),
       };
-      if (onVacationEmployeeIds.length > 0) {
-        base.onVacationEmployeeIds = onVacationEmployeeIds;
-      }
-      return base as ScheduleDay;
     });
 
     for (const day of days) {
-      const dateObj = new Date(day.date);
-      const weekdayIndex = dateObj.getDay();
-      const weekdayKey = WEEKDAY_KEYS[weekdayIndex];
-
       if (day.isHoliday || day.isWeekend) continue;
 
-      const available = employees.filter(
+      const weekdayIndex = new Date(day.date).getDay(); // 0 = sunday, ..., 6 = saturday
+      const weekdayKey = WEEKDAY_KEYS[weekdayIndex]; // ["sunday", "monday", ..., "saturday"]
+
+      const availableEmployees = employees.filter(
         (e) =>
           e.isActive &&
           e.workDays.includes(weekdayKey) &&
@@ -230,11 +226,11 @@ export class ScheduleService {
 
       console.log(
         `📆 ${day.date} (${weekdayKey}) → disponíveis: ${
-          available.map((a) => a.name).join(", ") || "nenhum"
+          availableEmployees.map((e) => e.name).join(", ") || "nenhum"
         }`
       );
 
-      for (const emp of available) {
+      for (const emp of availableEmployees) {
         const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
         day.assignments.push({
           id: `${emp.id}-${day.date}`,
@@ -247,17 +243,19 @@ export class ScheduleService {
     }
 
     const totalAssignments = days.reduce(
-      (acc, d) => acc + d.assignments.length,
+      (sum, d) => sum + d.assignments.length,
       0
     );
-    console.log(`✅ Escala gerada com ${totalAssignments} assignments.`);
+    console.log(`✅ Escala gerada com ${totalAssignments} atribuições.`);
+
     if (totalAssignments === 0) {
       console.warn(
-        "⚠️ Nenhum funcionário foi escalado! Verifique workDays e filtros."
+        "⚠️ Nenhuma atribuição gerada! Verifique se os funcionários possuem workDays válidos."
       );
     }
 
     const now = new Date().toISOString();
+
     return {
       year,
       month,
