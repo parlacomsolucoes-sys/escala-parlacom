@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: escala-parlacom-api
+    env: node
+    region: oregon
+    plan: free # troque se quiser 24/7
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
