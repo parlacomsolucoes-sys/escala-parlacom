@@ -200,11 +200,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const employeeId = req.query.employeeId as string;
 
       if (isNaN(year)) {
-        return res
-          .status(400)
-          .json({
-            message: "Year parameter is required and must be a valid number",
-          });
+        return res.status(400).json({
+          message: "Year parameter is required and must be a valid number",
+        });
       }
 
       const vacations = await vacationService.list(year, employeeId);
@@ -396,35 +394,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
 
         res.status(201).json(result.schedule);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
-            .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Generate schedule error:", error);
-          res.status(500).json({
-            message: "Failed to generate schedule",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
-        }
-      }
-    }
-  );
-
-  // Schedule generation route (kept for backwards compatibility)
-  app.post(
-    "/api/schedule/generate",
-    requireAuth,
-    async (req: AuthenticatedRequest, res) => {
-      try {
-        const { year, month } = generateMonthlyScheduleSchema.parse(req.body);
-        const schedule = await scheduleService.generateMonthlySchedule(
-          year,
-          month
-        );
-        res.status(201).json(schedule);
       } catch (error) {
         if (error instanceof z.ZodError) {
           res
