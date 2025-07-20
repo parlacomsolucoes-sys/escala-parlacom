@@ -142,6 +142,16 @@ export const monthlyScheduleSchema = z.object({
 });
 export type MonthlySchedule = z.infer<typeof monthlyScheduleSchema>;
 
+// ===== (Re)Add Monthly Schedule Generation Request Schema (used in routes) =====
+export const generateMonthlyScheduleSchema = z.object({
+  year: z.number().min(2020).max(2030),
+  month: z.number().min(1).max(12),
+});
+
+export type GenerateMonthlyScheduleRequest = z.infer<
+  typeof generateMonthlyScheduleSchema
+>;
+
 /* ---------------------------------------------------------
  * Compatibilidade: onde o front antigo esperava ScheduleEntry[]
  * agora cada ScheduleEntry = ScheduleDay
