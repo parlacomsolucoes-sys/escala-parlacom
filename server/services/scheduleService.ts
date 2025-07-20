@@ -211,34 +211,62 @@ export class ScheduleService {
       };
     });
 
+    // Separar revezamento
+    const weekendEmployees = employees.filter(
+      (e) => e.isActive && e.weekendRotation === true
+    );
+
+    let rotationIndex = 0;
     for (const day of days) {
-      if (day.isHoliday || day.isWeekend) continue;
+      const dateObj = new Date(day.date);
+      const weekdayIndex = dateObj.getDay();
+      const weekdayKey = WEEKDAY_KEYS[weekdayIndex];
 
-      const weekdayIndex = new Date(day.date).getDay(); // 0 = sunday, ..., 6 = saturday
-      const weekdayKey = WEEKDAY_KEYS[weekdayIndex]; // ["sunday", "monday", ..., "saturday"]
+      const onVacationEmployeeIds = day.onVacationEmployeeIds || [];
 
-      const availableEmployees = employees.filter(
-        (e) =>
-          e.isActive &&
-          e.workDays.includes(weekdayKey) &&
-          !(day.onVacationEmployeeIds || []).includes(e.id)
-      );
+      if (day.isHoliday || (!day.isWeekend && !day.isHoliday)) {
+        // Dias úteis
+        const availableEmployees = employees.filter(
+          (e) =>
+            e.isActive &&
+            e.workDays.includes(weekdayKey) &&
+            !onVacationEmployeeIds.includes(e.id)
+        );
 
-      console.log(
-        `📆 ${day.date} (${weekdayKey}) → disponíveis: ${
-          availableEmployees.map((e) => e.name).join(", ") || "nenhum"
-        }`
-      );
+        console.log(
+          `📆 ${day.date} (${weekdayKey}) → disponíveis: ${
+            availableEmployees.map((e) => e.name).join(", ") || "nenhum"
+          }`
+        );
 
-      for (const emp of availableEmployees) {
-        const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
-        day.assignments.push({
-          id: `${emp.id}-${day.date}`,
-          employeeId: emp.id,
-          employeeName: emp.name,
-          startTime: normalizeTime(times.startTime),
-          endTime: normalizeTime(times.endTime),
-        });
+        for (const emp of availableEmployees) {
+          const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
+          day.assignments.push({
+            id: `${emp.id}-${day.date}`,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            startTime: normalizeTime(times.startTime),
+            endTime: normalizeTime(times.endTime),
+          });
+        }
+      } else if (day.isWeekend) {
+        // Revezamento
+        const available = weekendEmployees.filter(
+          (e) => !onVacationEmployeeIds.includes(e.id)
+        );
+
+        if (available.length > 0) {
+          const selected = available[rotationIndex % available.length];
+          const times = pickEmployeeDefaultTimes(selected, weekdayIndex);
+          day.assignments.push({
+            id: `${selected.id}-${day.date}`,
+            employeeId: selected.id,
+            employeeName: selected.name,
+            startTime: normalizeTime(times.startTime),
+            endTime: normalizeTime(times.endTime),
+          });
+          rotationIndex++;
+        }
       }
     }
 
@@ -260,7 +288,9 @@ export class ScheduleService {
       year,
       month,
       days,
-      rotationState: { lastWeekendIndex: 0 },
+      rotationState: {
+        lastWeekendIndex: rotationIndex % (weekendEmployees.length || 1),
+      },
       generatedAt: now,
       updatedAt: now,
       version: 1,
