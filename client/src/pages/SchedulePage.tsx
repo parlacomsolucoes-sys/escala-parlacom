@@ -14,7 +14,6 @@ import {
   useSchedule,
   useHolidays,
   useGenerateMonthlySchedule,
-  useGenerateWeekendSchedule,
 } from "@/hooks/useSchedule";
 import { useToast } from "@/hooks/use-toast";
 import DayEditModal from "@/components/modals/DayEditModal";
@@ -60,7 +59,6 @@ export default function SchedulePage() {
   const { data: holidays = [], isLoading: holidaysLoading } = useHolidays();
 
   const generateSchedule = useGenerateMonthlySchedule();
-  const generateWeekendSchedule = useGenerateWeekendSchedule();
 
   const formatMonthYear = (date: Date) =>
     date.toLocaleDateString("pt-BR", {
@@ -237,23 +235,6 @@ export default function SchedulePage() {
     }
   };
 
-  const handleGenerateWeekendSchedule = async () => {
-    if (!user) return;
-    try {
-      const result = await generateWeekendSchedule.mutateAsync({ year, month });
-      toast({
-        title: "Escala de fins de semana gerada",
-        description: `${result.daysUpdated} dias de fim de semana programados`,
-      });
-    } catch {
-      toast({
-        title: "Erro ao gerar escala de fins de semana",
-        description: "Não foi possível gerar a escala de fins de semana",
-        variant: "destructive",
-      });
-    }
-  };
-
   const getAssignmentColor = (index: number) => {
     const colors = [
       "bg-blue-100 text-blue-800",
@@ -386,17 +367,6 @@ export default function SchedulePage() {
               >
                 <Calendar className="mr-2" size={16} />
                 {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
-              </Button>
-              <Button
-                onClick={handleGenerateWeekendSchedule}
-                disabled={generateWeekendSchedule.isPending}
-                variant="outline"
-                className="border-brand text-brand hover:bg-brand hover:text-white"
-              >
-                <Plus className="mr-2" size={16} />
-                {generateWeekendSchedule.isPending
-                  ? "Gerando..."
-                  : "Fins de Semana"}
               </Button>
             </div>
           )}

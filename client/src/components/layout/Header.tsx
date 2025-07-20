@@ -30,37 +30,49 @@ export default function Header() {
               <div className="flex-shrink-0">
                 <h1 className="text-xl font-bold text-gray-900">
                   <Calendar className="inline text-brand mr-2" size={20} />
-                  ScheduleMaster
+                  Escala Suporte - Parlacom
                 </h1>
               </div>
               <div className="hidden md:block ml-10">
                 <div className="flex items-baseline space-x-4">
-                  <Link href="/" className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    isActive("/") 
-                      ? "text-brand border-b-2 border-brand" 
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}>
+                  <Link
+                    href="/"
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive("/")
+                        ? "text-brand border-b-2 border-brand"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
                     Escala
                   </Link>
-                  <Link href="/employees" className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    isActive("/employees") 
-                      ? "text-brand border-b-2 border-brand" 
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}>
+                  <Link
+                    href="/employees"
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive("/employees")
+                        ? "text-brand border-b-2 border-brand"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
                     Funcionários
                   </Link>
-                  <Link href="/holidays" className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    isActive("/holidays") 
-                      ? "text-brand border-b-2 border-brand" 
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}>
+                  <Link
+                    href="/holidays"
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive("/holidays")
+                        ? "text-brand border-b-2 border-brand"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
                     Feriados
                   </Link>
-                  <Link href="/vacations" className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    isActive("/vacations") 
-                      ? "text-brand border-b-2 border-brand" 
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}>
+                  <Link
+                    href="/vacations"
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive("/vacations")
+                        ? "text-brand border-b-2 border-brand"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
                     Férias
                   </Link>
                 </div>
@@ -92,31 +104,40 @@ export default function Header() {
             </div>
           </div>
         </div>
-        
+
         {/* Mobile menu */}
         <div className="md:hidden border-t border-gray-200">
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            <Link href="/" className={`block px-3 py-2 text-base font-medium rounded-md ${
-              isActive("/") 
-                ? "text-brand bg-brand/10" 
-                : "text-gray-600 hover:text-gray-900"
-            }`}>
+            <Link
+              href="/"
+              className={`block px-3 py-2 text-base font-medium rounded-md ${
+                isActive("/")
+                  ? "text-brand bg-brand/10"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
               <Calendar className="inline mr-2" size={16} />
               Escala
             </Link>
-            <Link href="/employees" className={`block px-3 py-2 text-base font-medium rounded-md ${
-              isActive("/employees") 
-                ? "text-brand bg-brand/10" 
-                : "text-gray-600 hover:text-gray-900"
-            }`}>
+            <Link
+              href="/employees"
+              className={`block px-3 py-2 text-base font-medium rounded-md ${
+                isActive("/employees")
+                  ? "text-brand bg-brand/10"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
               <Users className="inline mr-2" size={16} />
               Funcionários
             </Link>
-            <Link href="/holidays" className={`block px-3 py-2 text-base font-medium rounded-md ${
-              isActive("/holidays") 
-                ? "text-brand bg-brand/10" 
-                : "text-gray-600 hover:text-gray-900"
-            }`}>
+            <Link
+              href="/holidays"
+              className={`block px-3 py-2 text-base font-medium rounded-md ${
+                isActive("/holidays")
+                  ? "text-brand bg-brand/10"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
               <Star className="inline mr-2" size={16} />
               Feriados
             </Link>

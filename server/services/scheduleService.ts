@@ -211,32 +211,45 @@ export class ScheduleService {
       };
     });
 
-    // Separar revezamento
+    // Revezamento entre dois funcionários
     const weekendEmployees = employees.filter(
       (e) => e.isActive && e.weekendRotation === true
     );
 
-    let rotationIndex = 0;
-    for (const day of days) {
+    if (weekendEmployees.length < 2) {
+      console.warn(
+        "⚠️ São necessários pelo menos dois funcionários com revezamento de fim de semana."
+      );
+    }
+
+    // Garantir ordem estável de revezamento
+    weekendEmployees.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Recuperar último estado de rotação
+    const previousMonth = month === 1 ? 12 : month - 1;
+    const previousYear = month === 1 ? year - 1 : year;
+    const previousSchedule = await this.getMonthlySchedule(
+      previousYear,
+      previousMonth
+    ).catch(() => null);
+    let lastSwap = previousSchedule?.rotationState?.lastSwap ?? false;
+
+    let swap = lastSwap;
+
+    for (let i = 0; i < days.length; i++) {
+      const day = days[i];
       const dateObj = new Date(day.date);
       const weekdayIndex = dateObj.getDay();
       const weekdayKey = WEEKDAY_KEYS[weekdayIndex];
-
       const onVacationEmployeeIds = day.onVacationEmployeeIds || [];
 
-      if (day.isHoliday || (!day.isWeekend && !day.isHoliday)) {
+      if (!day.isWeekend && !day.isHoliday) {
         // Dias úteis
         const availableEmployees = employees.filter(
           (e) =>
             e.isActive &&
             e.workDays.includes(weekdayKey) &&
             !onVacationEmployeeIds.includes(e.id)
-        );
-
-        console.log(
-          `📆 ${day.date} (${weekdayKey}) → disponíveis: ${
-            availableEmployees.map((e) => e.name).join(", ") || "nenhum"
-          }`
         );
 
         for (const emp of availableEmployees) {
@@ -249,23 +262,26 @@ export class ScheduleService {
             endTime: normalizeTime(times.endTime),
           });
         }
-      } else if (day.isWeekend) {
-        // Revezamento
-        const available = weekendEmployees.filter(
-          (e) => !onVacationEmployeeIds.includes(e.id)
-        );
+      } else if (day.isWeekend && weekendEmployees.length >= 2) {
+        // Sábado ou Domingo com revezamento alternado
+        const empA = weekendEmployees[0];
+        const empB = weekendEmployees[1];
+        const emp = (weekdayIndex === 6) === swap ? empA : empB;
 
-        if (available.length > 0) {
-          const selected = available[rotationIndex % available.length];
-          const times = pickEmployeeDefaultTimes(selected, weekdayIndex);
+        if (!onVacationEmployeeIds.includes(emp.id)) {
+          const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
           day.assignments.push({
-            id: `${selected.id}-${day.date}`,
-            employeeId: selected.id,
-            employeeName: selected.name,
+            id: `${emp.id}-${day.date}`,
+            employeeId: emp.id,
+            employeeName: emp.name,
             startTime: normalizeTime(times.startTime),
             endTime: normalizeTime(times.endTime),
           });
-          rotationIndex++;
+        }
+
+        if (weekdayIndex === 0) {
+          // domingo → troca revezamento da semana seguinte
+          swap = !swap;
         }
       }
     }
@@ -289,95 +305,11 @@ export class ScheduleService {
       month,
       days,
       rotationState: {
-        lastWeekendIndex: rotationIndex % (weekendEmployees.length || 1),
+        lastSwap: swap,
       },
       generatedAt: now,
       updatedAt: now,
       version: 1,
-    };
-  }
-
-  async generateWeekendSchedule(
-    year: number,
-    month: number
-  ): Promise<{
-    message: string;
-    daysUpdated: number;
-    rotationState: { lastWeekendIndex: number };
-  }> {
-    const employees = await this.getAllEmployees();
-    const weekendEmployees = employees
-      .filter((e) => e.weekendRotation && e.isActive)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    if (weekendEmployees.length === 0) {
-      return {
-        message: "No employees available for weekend rotation",
-        daysUpdated: 0,
-        rotationState: { lastWeekendIndex: 0 },
-      };
-    }
-
-    const docId = getMonthlyScheduleId(year, month);
-    const docRef = this.schedulesCollection.doc(docId);
-    const snap = await docRef.get();
-
-    let monthlySchedule: MonthlySchedule;
-    if (!snap.exists) {
-      monthlySchedule = await this.createMonthlySchedule(year, month);
-    } else {
-      monthlySchedule = snap.data() as MonthlySchedule;
-    }
-
-    let daysUpdated = 0;
-    let currentIndex = monthlySchedule.rotationState?.lastWeekendIndex || 0;
-
-    for (const day of monthlySchedule.days) {
-      if (day.isWeekend && !day.isHoliday) {
-        let chosen: Employee | null = null;
-        let attempts = 0;
-        while (attempts < weekendEmployees.length) {
-          const candidate =
-            weekendEmployees[currentIndex % weekendEmployees.length];
-          const vacation =
-            day.onVacationEmployeeIds?.includes(candidate.id) || false;
-          if (!vacation) {
-            chosen = candidate;
-            break;
-          }
-          currentIndex++;
-          attempts++;
-        }
-
-        if (chosen) {
-          // Remove qualquer outro da rotação já atribuído
-          day.assignments = day.assignments.filter(
-            (a) => !weekendEmployees.some((we) => we.id === a.employeeId)
-          );
-          const wIdx = new Date(day.date).getDay();
-          const times = pickEmployeeDefaultTimes(chosen, wIdx);
-          day.assignments.push({
-            id: `${chosen.id}-${day.date}`,
-            employeeId: chosen.id,
-            employeeName: chosen.name,
-            startTime: normalizeTime(times.startTime),
-            endTime: normalizeTime(times.endTime),
-          });
-          currentIndex++;
-          daysUpdated++;
-        }
-      }
-    }
-
-    monthlySchedule.rotationState = { lastWeekendIndex: currentIndex };
-    monthlySchedule.updatedAt = new Date().toISOString();
-    await docRef.set(monthlySchedule);
-    scheduleCache.delete(docId);
-
-    return {
-      message: `Updated ${daysUpdated} weekend days with rotation`,
-      daysUpdated,
-      rotationState: monthlySchedule.rotationState,
     };
   }
 
