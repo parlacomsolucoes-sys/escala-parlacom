@@ -1,239 +1,234 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Calendar, Plus } from "lucide-react";
+// src/pages/SchedulePage.tsx
+import { useState, useMemo } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  Plus,
+  Loader2,
+  Info,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { useSchedule, useHolidays, useGenerateMonthlySchedule, useGenerateWeekendSchedule } from "@/hooks/useSchedule";
+import {
+  useSchedule,
+  useHolidays,
+  useGenerateMonthlySchedule,
+  useGenerateWeekendSchedule,
+} from "@/hooks/useSchedule";
 import { useToast } from "@/hooks/use-toast";
 import DayEditModal from "@/components/modals/DayEditModal";
-import type { ScheduleEntry, Holiday } from "@shared/schema";
-import { isWeekend, isHoliday } from "@shared/schema";
+import {
+  isWeekend as utilIsWeekend,
+  isHoliday as utilIsHoliday,
+} from "@shared/schema";
 import { formatDateKey, getCurrentDateKey } from "@shared/utils/date";
+
+interface CalendarDay {
+  date: Date;
+  dateString: string;
+  day: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isWeekend: boolean;
+  holiday: any;
+  assignments: any[];
+}
 
 export default function SchedulePage() {
   const { user } = useAuth();
   const { toast } = useToast();
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<"month" | "week" | "day">("month");
-  const [selectedDay, setSelectedDay] = useState<{ date: string; assignments: any[] } | null>(null);
+  const [selectedDay, setSelectedDay] = useState<{
+    date: string;
+    assignments: any[];
+  } | null>(null);
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(new Date());
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
 
-  const { data: scheduleEntries = [], isLoading: scheduleLoading } = useSchedule(year, month);
-  const { data: holidays = [] } = useHolidays();
+  const {
+    data: scheduleEntries = [],
+    isLoading: scheduleLoading,
+    isFetching: scheduleFetching,
+    error: scheduleError,
+  } = useSchedule(year, month);
+
+  const { data: holidays = [], isLoading: holidaysLoading } = useHolidays();
+
   const generateSchedule = useGenerateMonthlySchedule();
   const generateWeekendSchedule = useGenerateWeekendSchedule();
 
-  const formatMonthYear = (date: Date) => {
-    return date.toLocaleDateString('pt-BR', { 
-      year: 'numeric', 
-      month: 'long' 
+  const formatMonthYear = (date: Date) =>
+    date.toLocaleDateString("pt-BR", {
+      year: "numeric",
+      month: "long",
     });
-  };
 
-  // PHASE 4: Get next weekend information
-  const getNextWeekendInfo = () => {
+  /* ================= Próximos Finais de Semana ================= */
+  const nextWeekends = useMemo(() => {
     const today = new Date();
-    const futureWeekends: Array<{date: Date, assignments: any[]}> = [];
-    
-    // Check next 4 weeks for weekends
+    const future: Array<{ date: Date; assignments: any[] }> = [];
     for (let i = 0; i < 28; i++) {
-      const checkDate = new Date(today);
-      checkDate.setDate(today.getDate() + i);
-      
-      if (checkDate.getDay() === 6 || checkDate.getDay() === 0) { // Saturday or Sunday
-        const dateString = formatDateKey(checkDate);
-        const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
-        
-        if (checkDate >= today) {
-          futureWeekends.push({
-            date: checkDate,
-            assignments: scheduleEntry?.assignments || []
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      if (d.getDay() === 6 || d.getDay() === 0) {
+        const key = formatDateKey(d);
+        const entry = scheduleEntries.find((e: any) => e.date === key);
+        if (d >= today) {
+          future.push({
+            date: d,
+            assignments: entry?.assignments || [],
           });
         }
       }
     }
-    
-    return futureWeekends.slice(0, 4); // Next 4 weekend days
-  };
+    return future.slice(0, 4);
+  }, [scheduleEntries]);
 
-  // PHASE 4: Get next holidays information
-  const getNextHolidaysInfo = () => {
+  /* ================= Próximos Feriados ================= */
+  const nextHolidays = useMemo(() => {
     const today = new Date();
     const currentYear = today.getFullYear();
-    const nextHolidays: Array<{name: string, date: Date}> = [];
-    
-    holidays.forEach(holiday => {
-      const [month, day] = holiday.date.split('-').map(Number);
-      
-      // Check this year's occurrence
-      let holidayDate = new Date(currentYear, month - 1, day);
+    const arr: Array<{ name: string; date: Date }> = [];
+
+    holidays.forEach((h: any) => {
+      // holiday.date no backend está Normalizado "MM-DD"
+      if (!h.date) return;
+      const [m, d] = h.date.split("-").map(Number);
+      let holidayDate = new Date(currentYear, m - 1, d);
       if (holidayDate >= today) {
-        nextHolidays.push({
-          name: holiday.name,
-          date: holidayDate
-        });
+        arr.push({ name: h.name, date: holidayDate });
       } else {
-        // If passed this year, add next year's occurrence
-        holidayDate = new Date(currentYear + 1, month - 1, day);
-        nextHolidays.push({
-          name: holiday.name,
-          date: holidayDate
-        });
+        holidayDate = new Date(currentYear + 1, m - 1, d);
+        arr.push({ name: h.name, date: holidayDate });
       }
     });
-    
-    // Sort by date and take first 3
-    return nextHolidays
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .slice(0, 3);
-  };
 
-  const navigateMonth = (direction: 'prev' | 'next') => {
-    setCurrentDate(prev => {
-      const newDate = new Date(prev);
-      if (direction === 'prev') {
-        newDate.setMonth(prev.getMonth() - 1);
-      } else {
-        newDate.setMonth(prev.getMonth() + 1);
-      }
-      return newDate;
+    return arr.sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 3);
+  }, [holidays]);
+
+  /* ================= Navegação de Mês ================= */
+  const navigateMonth = (dir: "prev" | "next") => {
+    setCurrentDate((prev) => {
+      const n = new Date(prev);
+      n.setMonth(prev.getMonth() + (dir === "prev" ? -1 : 1));
+      return n;
     });
   };
 
-  // PHASE 3: Enhanced calendar data with view mode support
-  const getCalendarDays = () => {
+  /* ================= Calendar (Month View) ================= */
+  const calendarDays: CalendarDay[] = useMemo(() => {
     const firstDay = new Date(year, month - 1, 1);
-    const lastDay = new Date(year, month, 0);
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - firstDay.getDay());
-    
-    const days = [];
-    const currentDay = new Date(startDate);
-    
+    const days: CalendarDay[] = [];
+    const iter = new Date(startDate);
+
     for (let i = 0; i < 42; i++) {
-      const dateString = formatDateKey(currentDay);
-      const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
-      const isCurrentMonth = currentDay.getMonth() === month - 1;
-      const isToday = currentDay.toDateString() === new Date().toDateString();
-      const holiday = isHoliday(currentDay, holidays);
-      
+      const dateString = formatDateKey(iter);
+      const entry = scheduleEntries.find((e: any) => e.date === dateString);
+      const isCurrentMonth = iter.getMonth() === month - 1;
+      const isToday = iter.toDateString() === new Date().toDateString();
+      const holiday = utilIsHoliday(iter, holidays);
+
       days.push({
-        date: new Date(currentDay),
+        date: new Date(iter),
         dateString,
-        day: currentDay.getDate(),
+        day: iter.getDate(),
         isCurrentMonth,
         isToday,
-        isWeekend: isWeekend(currentDay),
+        isWeekend: utilIsWeekend(iter),
         holiday,
-        assignments: scheduleEntry?.assignments || []
+        assignments: entry?.assignments || [],
       });
-      
-      currentDay.setDate(currentDay.getDate() + 1);
-    }
-    
-    return days;
-  };
 
-  // PHASE 3: Get week view data
-  const getWeekDays = () => {
+      iter.setDate(iter.getDate() + 1);
+    }
+    return days;
+  }, [year, month, scheduleEntries, holidays]);
+
+  /* ================= Week View ================= */
+  const weekDays: CalendarDay[] = useMemo(() => {
     const startOfWeek = new Date(selectedWeekStart);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay()); // Sunday
-    
-    const days = [];
-    const currentDay = new Date(startOfWeek);
-    
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+    const result: CalendarDay[] = [];
+    const iter = new Date(startOfWeek);
+
     for (let i = 0; i < 7; i++) {
-      const dateString = formatDateKey(currentDay);
-      const scheduleEntry = scheduleEntries.find(entry => entry.date === dateString);
-      const isToday = currentDay.toDateString() === new Date().toDateString();
-      const holiday = isHoliday(currentDay, holidays);
-      
-      days.push({
-        date: new Date(currentDay),
+      const dateString = formatDateKey(iter);
+      const entry = scheduleEntries.find((e: any) => e.date === dateString);
+      const isToday = iter.toDateString() === new Date().toDateString();
+      const holiday = utilIsHoliday(iter, holidays);
+      result.push({
+        date: new Date(iter),
         dateString,
-        day: currentDay.getDate(),
-        isCurrentMonth: currentDay.getMonth() === month - 1,
+        day: iter.getDate(),
+        isCurrentMonth: iter.getMonth() === month - 1,
         isToday,
-        isWeekend: isWeekend(currentDay),
+        isWeekend: utilIsWeekend(iter),
         holiday,
-        assignments: scheduleEntry?.assignments || []
+        assignments: entry?.assignments || [],
       });
-      
-      currentDay.setDate(currentDay.getDate() + 1);
+      iter.setDate(iter.getDate() + 1);
     }
-    
-    return days;
-  };
+    return result;
+  }, [selectedWeekStart, scheduleEntries, holidays, month]);
 
-  // PHASE 3: Get single day data
-  const getDayData = () => {
+  /* ================= Day View ================= */
+  const dayData = useMemo(() => {
+    let targetDate: Date;
+    let dateString: string;
+
     if (!selectedDay) {
-      // Default to today if no day selected
-      const today = new Date();
-      const todayString = formatDateKey(today);
-      const scheduleEntry = scheduleEntries.find(entry => entry.date === todayString);
-      const holiday = isHoliday(today, holidays);
-      
-      return {
-        date: today,
-        dateString: todayString,
-        day: today.getDate(),
-        isToday: true,
-        isWeekend: isWeekend(today),
-        holiday,
-        assignments: scheduleEntry?.assignments || []
-      };
+      targetDate = new Date();
+      dateString = formatDateKey(targetDate);
+    } else {
+      dateString = selectedDay.date;
+      targetDate = new Date(selectedDay.date);
     }
-    
-    const scheduleEntry = scheduleEntries.find(entry => entry.date === selectedDay.date);
-    const dayDate = new Date(selectedDay.date);
-    const holiday = isHoliday(dayDate, holidays);
-    
-    return {
-      date: dayDate,
-      dateString: selectedDay.date,
-      day: dayDate.getDate(),
-      isToday: dayDate.toDateString() === new Date().toDateString(),
-      isWeekend: isWeekend(dayDate),
-      holiday,
-      assignments: scheduleEntry?.assignments || []
-    };
-  };
+    const entry = scheduleEntries.find((e: any) => e.date === dateString);
+    const holiday = utilIsHoliday(targetDate, holidays);
 
-  // Fixed day click handler - only opens modal
-  const handleDayClick = (day: any) => {
+    return {
+      date: targetDate,
+      dateString,
+      day: targetDate.getDate(),
+      isToday: targetDate.toDateString() === new Date().toDateString(),
+      isWeekend: utilIsWeekend(targetDate),
+      holiday,
+      assignments: entry?.assignments || [],
+    };
+  }, [selectedDay, scheduleEntries, holidays]);
+
+  /* ================= Handlers ================= */
+  const handleDayClick = (day: CalendarDay) => {
     setSelectedDay({
       date: day.dateString,
-      assignments: day.assignments
+      assignments: day.assignments,
     });
-    // Modal will open automatically due to selectedDay state change
   };
 
-  // PHASE 3: Week navigation
-  const navigateWeek = (direction: 'prev' | 'next') => {
-    setSelectedWeekStart(prev => {
-      const newDate = new Date(prev);
-      if (direction === 'prev') {
-        newDate.setDate(prev.getDate() - 7);
-      } else {
-        newDate.setDate(prev.getDate() + 7);
-      }
-      return newDate;
+  const navigateWeek = (dir: "prev" | "next") => {
+    setSelectedWeekStart((prev) => {
+      const n = new Date(prev);
+      n.setDate(prev.getDate() + (dir === "prev" ? -7 : 7));
+      return n;
     });
   };
 
   const handleGenerateSchedule = async () => {
     if (!user) return;
-    
     try {
       await generateSchedule.mutateAsync({ year, month });
       toast({
         title: "Escala gerada",
         description: "Escala mensal foi gerada com sucesso",
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Erro ao gerar escala",
         description: "Não foi possível gerar a escala mensal",
@@ -242,17 +237,15 @@ export default function SchedulePage() {
     }
   };
 
-  // PHASE 5: Weekend schedule generation handler
   const handleGenerateWeekendSchedule = async () => {
     if (!user) return;
-    
     try {
       const result = await generateWeekendSchedule.mutateAsync({ year, month });
       toast({
         title: "Escala de fins de semana gerada",
-        description: `${result.daysGenerated} dias de fins de semana foram programados`,
+        description: `${result.daysUpdated} dias de fim de semana programados`,
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Erro ao gerar escala de fins de semana",
         description: "Não foi possível gerar a escala de fins de semana",
@@ -260,15 +253,6 @@ export default function SchedulePage() {
       });
     }
   };
-
-  // PHASE 3: Get data based on view mode
-  const calendarDays = getCalendarDays();
-  const weekDays = getWeekDays();
-  const dayData = getDayData();
-  
-  // PHASE 4: Get upcoming info
-  const nextWeekends = getNextWeekendInfo();
-  const nextHolidays = getNextHolidaysInfo();
 
   const getAssignmentColor = (index: number) => {
     const colors = [
@@ -281,17 +265,50 @@ export default function SchedulePage() {
     return colors[index % colors.length];
   };
 
+  /* ================= Loading / Error states ================= */
+  if (scheduleLoading || holidaysLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+        <Loader2 className="animate-spin mb-4" size={32} />
+        Carregando escala...
+      </div>
+    );
+  }
+
+  if (scheduleError) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-600 font-medium mb-2">
+          Erro ao carregar escala.
+        </p>
+        <p className="text-sm text-gray-500">
+          Tente atualizar a página ou gerar novamente.
+        </p>
+      </div>
+    );
+  }
+
+  /* ================= Render ================= */
   return (
     <div className="space-y-6">
-      {/* Page Header with View Controls */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Escala de Trabalho</h2>
-          <p className="text-gray-600 mt-1">Visualize e gerencie a escala mensal dos funcionários</p>
+          <h2 className="text-2xl font-bold text-gray-900">
+            Escala de Trabalho
+          </h2>
+          <p className="text-gray-600 mt-1">
+            Visualize e gerencie a escala mensal dos funcionários
+          </p>
+          {scheduleFetching && (
+            <span className="inline-flex items-center text-xs text-gray-400 mt-1">
+              <Loader2 size={14} className="animate-spin mr-1" /> atualizando...
+            </span>
+          )}
         </div>
-        
+
         <div className="flex items-center space-x-4">
-          {/* View Mode Toggles */}
+          {/* Toggle View */}
           <div className="bg-white rounded-lg border border-gray-200 p-1 flex">
             <Button
               variant={viewMode === "month" ? "default" : "ghost"}
@@ -318,13 +335,13 @@ export default function SchedulePage() {
               Dia
             </Button>
           </div>
-          
+
           {/* Month Navigation */}
           <div className="flex items-center space-x-2">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigateMonth('prev')}
+              onClick={() => navigateMonth("prev")}
               className="p-2"
             >
               <ChevronLeft size={16} />
@@ -335,7 +352,7 @@ export default function SchedulePage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigateMonth('next')}
+              onClick={() => navigateMonth("next")}
               className="p-2"
             >
               <ChevronRight size={16} />
@@ -344,9 +361,14 @@ export default function SchedulePage() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setCurrentDate(new Date());
+                const today = new Date();
+                setCurrentDate(today);
+                setSelectedWeekStart(today);
                 setViewMode("day");
-                setSelectedDay({ date: getCurrentDateKey(), assignments: [] });
+                setSelectedDay({
+                  date: getCurrentDateKey(),
+                  assignments: [],
+                });
               }}
               className="px-3"
             >
@@ -354,7 +376,7 @@ export default function SchedulePage() {
             </Button>
           </div>
 
-          {/* Generate Schedule Buttons (Admin Only) */}
+          {/* Generate Buttons */}
           {user && (
             <div className="flex space-x-2">
               <Button
@@ -365,7 +387,6 @@ export default function SchedulePage() {
                 <Calendar className="mr-2" size={16} />
                 {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
               </Button>
-              {/* PHASE 5: Weekend schedule generation button */}
               <Button
                 onClick={handleGenerateWeekendSchedule}
                 disabled={generateWeekendSchedule.isPending}
@@ -373,41 +394,46 @@ export default function SchedulePage() {
                 className="border-brand text-brand hover:bg-brand hover:text-white"
               >
                 <Plus className="mr-2" size={16} />
-                {generateWeekendSchedule.isPending ? "Gerando..." : "Fins de Semana"}
+                {generateWeekendSchedule.isPending
+                  ? "Gerando..."
+                  : "Fins de Semana"}
               </Button>
             </div>
           )}
         </div>
       </div>
 
-      {/* PHASE 4: Information Panel */}
+      {/* Painéis Laterais */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Next Weekends Card */}
+        {/* Próximos Finais de Semana */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <Calendar className="mr-2 text-brand" size={20} />
             Próximos Finais de Semana
           </h3>
           {nextWeekends.length === 0 ? (
-            <p className="text-gray-500">Nenhum final de semana encontrado nos próximos dias</p>
+            <p className="text-gray-500">
+              Nenhum final de semana encontrado nos próximos dias
+            </p>
           ) : (
             <div className="space-y-3">
-              {nextWeekends.slice(0, 2).map((weekend, idx) => (
-                <div key={idx} className="border-l-4 border-l-brand pl-4 py-2">
+              {nextWeekends.slice(0, 2).map((w, i) => (
+                <div
+                  key={i}
+                  className="border-l-4 border-l-brand pl-4 py-2 bg-gray-50/40 rounded"
+                >
                   <div className="font-medium text-gray-900">
-                    {weekend.date.toLocaleDateString('pt-BR', { 
-                      weekday: 'long', 
-                      day: 'numeric', 
-                      month: 'short' 
+                    {w.date.toLocaleDateString("pt-BR", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "short",
                     })}
                   </div>
-                  {weekend.assignments.length === 0 ? (
-                    <div className="text-sm text-red-500">
-                      ⚠️ Não gerado
-                    </div>
+                  {w.assignments.length === 0 ? (
+                    <div className="text-sm text-red-500">⚠️ Não gerado</div>
                   ) : (
                     <div className="text-sm text-gray-600">
-                      {weekend.assignments.map(a => a.employeeName).join(', ')}
+                      {w.assignments.map((a) => a.employeeName).join(", ")}
                     </div>
                   )}
                 </div>
@@ -416,7 +442,7 @@ export default function SchedulePage() {
           )}
         </div>
 
-        {/* Next Holidays Card */}
+        {/* Próximos Feriados */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <Calendar className="mr-2 text-brand" size={20} />
@@ -426,16 +452,17 @@ export default function SchedulePage() {
             <p className="text-gray-500">Nenhum feriado cadastrado</p>
           ) : (
             <div className="space-y-3">
-              {nextHolidays.map((holiday, idx) => (
-                <div key={idx} className="border-l-4 border-l-orange-400 pl-4 py-2">
-                  <div className="font-medium text-gray-900">
-                    {holiday.name}
-                  </div>
+              {nextHolidays.map((h, i) => (
+                <div
+                  key={i}
+                  className="border-l-4 border-l-orange-400 pl-4 py-2 bg-orange-50/40 rounded"
+                >
+                  <div className="font-medium text-gray-900">{h.name}</div>
                   <div className="text-sm text-gray-600">
-                    {holiday.date.toLocaleDateString('pt-BR', { 
-                      day: 'numeric', 
-                      month: 'long', 
-                      year: 'numeric' 
+                    {h.date.toLocaleDateString("pt-BR", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
                     })}
                   </div>
                 </div>
@@ -445,171 +472,202 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {/* PHASE 3: Dynamic view rendering based on viewMode */}
+      {/* ===== Month View ===== */}
       {viewMode === "month" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          {/* Calendar Header (Days of Week) */}
+          {/* Weekday Header */}
           <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
-            {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day) => (
-              <div key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                {day}
+            {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
+              <div
+                key={d}
+                className="px-4 py-3 text-center text-sm font-semibold text-gray-700"
+              >
+                {d}
               </div>
             ))}
           </div>
-        
-        {/* Calendar Days Grid */}
-        <div className="grid grid-cols-7 divide-x divide-gray-200">
-          {calendarDays.map((day, index) => (
-            <div
-              key={index}
-              className={`h-32 p-2 cursor-pointer transition-colors border-b border-gray-100 ${
-                !day.isCurrentMonth 
-                  ? "bg-gray-50/50 text-gray-400" 
-                  : day.isToday
-                  ? "border-l-4 border-l-brand bg-brand/5"
-                  : day.isWeekend
-                  ? "bg-gray-50/80"
-                  : day.holiday
-                  ? "bg-brand/20"
-                  : "hover:bg-gray-50"
-              }`}
-              onClick={() => handleDayClick(day)}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className={`text-sm font-medium ${
-                  day.isToday ? "text-brand font-bold" : 
-                  !day.isCurrentMonth ? "text-gray-400" : 
-                  day.isWeekend ? "text-gray-700" : "text-gray-900"
-                }`}>
-                  {day.day}
-                </span>
-                {day.isToday && (
-                  <span className="text-xs text-brand font-medium">Hoje</span>
-                )}
-                {day.holiday && (
-                  <Calendar className="text-brand" size={12} />
-                )}
-              </div>
-              
-              {day.holiday && (
-                <div className="text-xs text-brand font-medium mb-1">
-                  {day.holiday.name}
-                </div>
-              )}
-              
-              <div className="space-y-1">
-                {day.assignments.slice(0, 2).map((assignment, idx) => (
-                  <div
-                    key={assignment.id}
-                    className={`text-xs px-2 py-1 rounded truncate ${getAssignmentColor(idx)}`}
-                  >
-                    {assignment.employeeName} - {assignment.startTime}-{assignment.endTime}
-                  </div>
-                ))}
-                {day.assignments.length > 2 && (
-                  <div className="text-xs text-gray-500 px-1">
-                    +{day.assignments.length - 2} mais
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        </div>
-      )}
-
-      {/* PHASE 3: Week View */}
-      {viewMode === "week" && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Semana de {weekDays[0]?.day}/{month} - {weekDays[6]?.day}/{month}
-              </h3>
-              <div className="flex items-center space-x-2">
-                <Button variant="ghost" size="sm" onClick={() => navigateWeek('prev')}>
-                  <ChevronLeft size={16} />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateWeek('next')}>
-                  <ChevronRight size={16} />
-                </Button>
-              </div>
-            </div>
-          </div>
+          {/* Days */}
           <div className="grid grid-cols-7 divide-x divide-gray-200">
-            {weekDays.map((day, index) => (
-              <div
-                key={index}
-                className={`p-4 min-h-[200px] cursor-pointer transition-colors ${
-                  day.isToday
-                    ? "border-l-4 border-l-brand bg-brand/5"
-                    : day.isWeekend
-                    ? "bg-gray-50/80"
-                    : day.holiday
-                    ? "bg-brand/20"
-                    : "hover:bg-gray-50"
-                }`}
-                onClick={() => handleDayClick(day)}
-              >
-                <div className="text-center mb-3">
-                  <div className="text-xs text-gray-500">
-                    {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"][index]}
+            {calendarDays.map((day, idx) => {
+              const baseCls =
+                "h-32 p-2 cursor-pointer transition-colors border-b border-gray-100 relative";
+              const visualCls = !day.isCurrentMonth
+                ? "bg-gray-50/50 text-gray-400"
+                : day.isToday
+                ? "border-l-4 border-l-brand bg-brand/5"
+                : day.isWeekend
+                ? "bg-gray-50/80"
+                : day.holiday
+                ? "bg-brand/20"
+                : "hover:bg-gray-50";
+
+              return (
+                <div
+                  key={idx}
+                  className={`${baseCls} ${visualCls}`}
+                  onClick={() => handleDayClick(day)}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span
+                      className={`text-sm font-medium ${
+                        day.isToday
+                          ? "text-brand font-bold"
+                          : !day.isCurrentMonth
+                          ? "text-gray-400"
+                          : day.isWeekend
+                          ? "text-gray-700"
+                          : "text-gray-900"
+                      }`}
+                    >
+                      {day.day}
+                    </span>
+                    {day.isToday && (
+                      <span className="text-xs text-brand font-medium">
+                        Hoje
+                      </span>
+                    )}
+                    {day.holiday && (
+                      <Calendar className="text-brand" size={12} />
+                    )}
                   </div>
-                  <div className={`text-sm font-medium ${
-                    day.isToday ? "text-brand font-bold" : "text-gray-900"
-                  }`}>
-                    {day.day}
-                  </div>
+
                   {day.holiday && (
-                    <div className="text-xs text-brand font-medium mt-1">
+                    <div className="text-[10px] leading-tight text-brand font-medium mb-1 line-clamp-2">
                       {day.holiday.name}
                     </div>
                   )}
+
+                  <div className="space-y-1">
+                    {day.assignments.slice(0, 2).map((a, i) => (
+                      <div
+                        key={a.id}
+                        className={`text-[10px] px-1.5 py-1 rounded truncate ${getAssignmentColor(
+                          i
+                        )}`}
+                        title={`${a.employeeName} ${a.startTime}-${a.endTime}`}
+                      >
+                        {a.employeeName} {a.startTime}-{a.endTime}
+                      </div>
+                    ))}
+                    {day.assignments.length > 2 && (
+                      <div className="text-[10px] text-gray-500 px-1">
+                        +{day.assignments.length - 2} mais
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {day.assignments.map((assignment, idx) => (
-                    <div
-                      key={assignment.id}
-                      className={`text-xs px-2 py-1 rounded ${getAssignmentColor(idx)}`}
-                    >
-                      <div className="font-medium">{assignment.employeeName}</div>
-                      <div>{assignment.startTime}-{assignment.endTime}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* PHASE 3: Day View */}
-      {viewMode === "day" && dayData && (
+      {/* ===== Week View ===== */}
+      {viewMode === "week" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">
-                  {dayData.date.toLocaleDateString('pt-BR', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </h3>
-                {dayData.holiday && (
-                  <div className="text-brand font-medium mt-1">
-                    🎄 Feriado: {dayData.holiday.name}
-                  </div>
-                )}
-              </div>
-              <Button 
-                variant="outline" 
-                onClick={() => setViewMode("month")}
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Semana de {weekDays[0]?.day}/{month} - {weekDays[6]?.day}/{month}
+            </h3>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigateWeek("prev")}
               >
-                Voltar ao Mês
+                <ChevronLeft size={16} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigateWeek("next")}
+              >
+                <ChevronRight size={16} />
               </Button>
             </div>
+          </div>
+          <div className="grid grid-cols-7 divide-x divide-gray-200">
+            {weekDays.map((day, index) => {
+              const cls = day.isToday
+                ? "border-l-4 border-l-brand bg-brand/5"
+                : day.isWeekend
+                ? "bg-gray-50/80"
+                : day.holiday
+                ? "bg-brand/20"
+                : "hover:bg-gray-50";
+
+              return (
+                <div
+                  key={index}
+                  className={`p-4 min-h-[200px] cursor-pointer transition-colors ${cls}`}
+                  onClick={() => handleDayClick(day)}
+                >
+                  <div className="text-center mb-3">
+                    <div className="text-xs text-gray-500">
+                      {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"][index]}
+                    </div>
+                    <div
+                      className={`text-sm font-medium ${
+                        day.isToday ? "text-brand font-bold" : "text-gray-900"
+                      }`}
+                    >
+                      {day.day}
+                    </div>
+                    {day.holiday && (
+                      <div className="text-[10px] text-brand font-medium mt-1 line-clamp-2">
+                        {day.holiday.name}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {day.assignments.map((a, i) => (
+                      <div
+                        key={a.id}
+                        className={`text-xs px-2 py-1 rounded ${getAssignmentColor(
+                          i
+                        )}`}
+                      >
+                        <div className="font-medium">{a.employeeName}</div>
+                        <div>
+                          {a.startTime}-{a.endTime}
+                        </div>
+                      </div>
+                    ))}
+                    {day.assignments.length === 0 && (
+                      <div className="text-[11px] text-gray-400 italic">
+                        sem escala
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===== Day View ===== */}
+      {viewMode === "day" && dayData && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900">
+                {dayData.date.toLocaleDateString("pt-BR", {
+                  weekday: "long",
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </h3>
+              {dayData.holiday && (
+                <div className="text-brand font-medium mt-1">
+                  🎄 Feriado: {dayData.holiday.name}
+                </div>
+              )}
+            </div>
+            <Button variant="outline" onClick={() => setViewMode("month")}>
+              Voltar ao Mês
+            </Button>
           </div>
           <div className="p-6">
             {dayData.assignments.length === 0 ? (
@@ -623,36 +681,43 @@ export default function SchedulePage() {
                   Funcionários Escalados ({dayData.assignments.length})
                 </h4>
                 {dayData.assignments
+                  .slice()
                   .sort((a, b) => a.employeeName.localeCompare(b.employeeName))
-                  .map((assignment, idx) => (
-                  <div
-                    key={assignment.id}
-                    className={`p-4 rounded-lg border ${
-                      dayData.isWeekend ? "border-orange-200 bg-orange-50" : "border-gray-200 bg-gray-50"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          {assignment.employeeName}
+                  .map((a, i) => (
+                    <div
+                      key={a.id}
+                      className={`p-4 rounded-lg border ${
+                        dayData.isWeekend
+                          ? "border-orange-200 bg-orange-50"
+                          : "border-gray-200 bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {a.employeeName}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {a.startTime} - {a.endTime}
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          {assignment.startTime} - {assignment.endTime}
+                        <div
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${getAssignmentColor(
+                            i
+                          )}`}
+                        >
+                          {dayData.isWeekend ? "Fim de Semana" : "Dia Útil"}
                         </div>
-                      </div>
-                      <div className={`px-3 py-1 rounded-full text-xs font-medium ${getAssignmentColor(idx)}`}>
-                        {dayData.isWeekend ? "Fim de Semana" : "Dia Útil"}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Day Edit Modal */}
+      {/* Modal de Edição */}
       {selectedDay && viewMode !== "day" && (
         <DayEditModal
           isOpen={!!selectedDay}

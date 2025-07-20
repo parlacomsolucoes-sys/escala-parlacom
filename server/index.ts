@@ -1,11 +1,10 @@
 // server/index.ts
-import "dotenv/config"; // Carrega .env o mais cedo possível
-
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
-// (1) Diagnóstico inicial das variáveis (sem expor chave privada)
 const requiredEnv = [
   "FIREBASE_PROJECT_ID",
   "FIREBASE_CLIENT_EMAIL",
@@ -16,73 +15,73 @@ if (missing.length) {
   console.warn("[startup] Variáveis Firebase ausentes:", missing.join(", "));
 } else {
   log(
-    `[startup] Firebase vars OK (project: ${process.env.FIREBASE_PROJECT_ID})`,
+    `[startup] Firebase vars OK (project: ${process.env.FIREBASE_PROJECT_ID})`
   );
 }
 
-// (2) Cria app Express
 const app = express();
-app.set("trust proxy", 1); // Replit / proxies
+app.set("trust proxy", 1);
 
-// (3) CORS opcional (ajuste ALLOWED_ORIGINS no .env se quiser restringir)
-import cors from "cors";
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+// ===== CORS ROBUSTO =====
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS ||
+  "https://escala.parlacomsolucoes.com.br,http://localhost:5173,http://localhost:3000"
+)
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-if (allowedOrigins.length) {
-  app.use(
-    cors({
-      origin: allowedOrigins,
-      credentials: true,
-    }),
-  );
-} else {
-  // CORS permissivo em desenvolvimento
-  app.use(
-    cors({
-      origin: true,
-      credentials: true,
-    }),
-  );
-}
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // mobile/native/postman
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error("Origin not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+  ],
+  maxAge: 86400,
+};
 
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // preflight
+
+// ===== Body parsers =====
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// (4) Logging de /api
+// ===== Logging simples para /api =====
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: any;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args: any[]) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+  let jsonOut: any;
+  const orig = res.json;
+  res.json = function (body, ...rest: any[]) {
+    jsonOut = body;
+    return orig.apply(res, [body, ...rest]);
   };
-
   res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let line = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+    if (req.path.startsWith("/api")) {
+      const ms = Date.now() - start;
+      let line = `${req.method} ${req.path} ${res.statusCode} ${ms}ms`;
+      if (jsonOut) {
         try {
-          const snippet = JSON.stringify(capturedJsonResponse);
-          if (snippet.length < 140) line += ` :: ${snippet}`;
-        } catch {
-          /* ignore */
-        }
+          const s = JSON.stringify(jsonOut);
+          if (s.length < 160) line += ` :: ${s}`;
+        } catch {}
       }
       log(line);
     }
   });
-
   next();
 });
 
-// (5) Healthcheck simple
+// Health
 app.get("/healthz", (_req, res) => {
   res.json({
     status: "ok",
@@ -92,24 +91,21 @@ app.get("/healthz", (_req, res) => {
   });
 });
 
-// (6) Inicialização async para poder aguardar Vite/rotas
 (async () => {
-  // Registra rotas de API
   const server = await registerRoutes(app);
 
-  // (7) Error handler (depois das rotas)
+  // Error handler (precisa vir depois das rotas)
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    // Log detalhado no servidor
-    console.error("[error]", status, message, err.stack);
-    res.status(status).json({ message });
+    console.error("[error]", status, err.message, err.stack);
+    // Important: ainda devolver cabeçalhos CORS (já que middleware cors foi global)
+    res.status(status).json({
+      message: err.message || "Internal Server Error",
+      code: err.code || "INTERNAL_ERROR",
+    });
   });
 
-  // (8) Decide se usa Vite (dev) ou serve estático (prod)
-  const nodeEnv = process.env.NODE_ENV || "development";
-  const isDev = nodeEnv === "development";
-
+  const isDev = (process.env.NODE_ENV || "development") === "development";
   if (isDev) {
     log("[startup] Modo desenvolvimento (Vite middleware)");
     await setupVite(app, server);
@@ -118,15 +114,8 @@ app.get("/healthz", (_req, res) => {
     serveStatic(app);
   }
 
-  // (9) Porta e listener
   const port = parseInt(process.env.PORT || "5000", 10);
-  const listenOptions: Parameters<typeof server.listen>[0] = {
-    port,
-    host: "0.0.0.0",
-    ...(process.platform !== "win32" ? { reusePort: true } : {}),
-  };
-
-  server.listen(listenOptions, () => {
+  server.listen({ port, host: "0.0.0.0" }, () => {
     log(`serving on port ${port}`);
   });
 })().catch((e) => {
@@ -134,10 +123,7 @@ app.get("/healthz", (_req, res) => {
   process.exit(1);
 });
 
-// (10) Captura erros não tratados
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err);
-});
+process.on("unhandledRejection", (r) =>
+  console.error("[unhandledRejection]", r)
+);
+process.on("uncaughtException", (e) => console.error("[uncaughtException]", e));
