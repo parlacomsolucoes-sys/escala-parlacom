@@ -22,7 +22,7 @@ import {
   isWeekend as utilIsWeekend,
   isHoliday as utilIsHoliday,
 } from "@shared/schema";
-import { formatDateKey, getCurrentDateKey } from "@/shared/utils/date";
+import { formatDateKey, getCurrentDateKey } from "@shared/utils/date";
 
 interface CalendarDay {
   date: Date;
