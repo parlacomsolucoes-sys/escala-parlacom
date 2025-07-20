@@ -228,10 +228,15 @@ export class ScheduleService {
     // Recuperar último estado de rotação
     const previousMonth = month === 1 ? 12 : month - 1;
     const previousYear = month === 1 ? year - 1 : year;
-    const previousSchedule = await this.getMonthlySchedule(
-      previousYear,
-      previousMonth
-    ).catch(() => null);
+    const previousSnap = await this.schedulesCollection
+      .doc(getMonthlyScheduleId(previousYear, previousMonth))
+      .get()
+      .catch(() => null);
+
+    const previousSchedule = previousSnap?.exists
+      ? (previousSnap.data() as MonthlySchedule)
+      : null;
+
     let lastSwap = previousSchedule?.rotationState?.lastSwap ?? false;
 
     let swap = lastSwap;
