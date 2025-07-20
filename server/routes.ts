@@ -1,13 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
 import { scheduleService } from "./services/scheduleService";
 import { vacationService } from "./services/vacationService";
-import {
-  requireAuth,
-  optionalAuth,
-  type AuthenticatedRequest,
-} from "./middleware/auth";
+import { requireAuth, type AuthenticatedRequest } from "./middleware/auth";
 import {
   insertEmployeeSchema,
   updateEmployeeSchema,
@@ -20,18 +15,18 @@ import {
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Employee routes
-  app.get("/api/employees", async (req, res) => {
+  /* =====================================================
+   * EMPLOYEES
+   * ===================================================*/
+  app.get("/api/employees", async (_req, res) => {
     try {
       const employees = await scheduleService.getAllEmployees();
       res.json(employees);
-    } catch (error) {
-      console.error("Get employees error:", error);
-      res.status(500).json({
-        message: "Failed to get employees",
-        detail: error.message,
-        code: error.code || "UNKNOWN_ERROR",
-      });
+    } catch (err: any) {
+      console.error("[GET /api/employees] Error:", err);
+      res
+        .status(500)
+        .json({ message: "Failed to get employees", detail: err.message });
     }
   });
 
@@ -40,49 +35,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        console.log(
-          "[POST /api/employees] Recebido body:",
-          JSON.stringify(req.body, null, 2)
-        );
-        console.log("[POST /api/employees] Usuario autenticado:", req.user);
-
-        const employeeData = insertEmployeeSchema.parse(req.body);
-        console.log(
-          "[POST /api/employees] Dados validados:",
-          JSON.stringify(employeeData, null, 2)
-        );
-
-        console.log("[Firestore] Tentando criar employee...");
-        const employee = await scheduleService.createEmployee(employeeData);
-        console.log(
-          "[POST /api/employees] Employee criado com sucesso:",
-          employee.id
-        );
-
+        const data = insertEmployeeSchema.parse(req.body);
+        const employee = await scheduleService.createEmployee(data);
         res.status(201).json(employee);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          console.log(
-            "[POST /api/employees] Erro de validação Zod:",
-            error.errors
-          );
-          res
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("[POST /api/employees] Erro detalhado:", {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            stack: error.stack,
-            name: error.constructor.name,
-          });
-          res.status(500).json({
-            message: "Failed to create employee",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        console.error("[POST /api/employees] Error:", err);
+        res
+          .status(500)
+          .json({ message: "Failed to create employee", detail: err.message });
       }
     }
   );
@@ -93,24 +58,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: AuthenticatedRequest, res) => {
       try {
         const { id } = req.params;
-        const updateData = updateEmployeeSchema
-          .omit({ id: true })
-          .parse(req.body);
-        const employee = await scheduleService.updateEmployee(id, updateData);
+        const data = updateEmployeeSchema.omit({ id: true }).parse(req.body);
+        const employee = await scheduleService.updateEmployee(id, data);
         res.json(employee);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Update employee error:", error);
-          res.status(500).json({
-            message: "Failed to update employee",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        console.error("[PATCH /api/employees/:id] Error:", err);
+        res
+          .status(500)
+          .json({ message: "Failed to update employee", detail: err.message });
       }
     }
   );
@@ -120,32 +80,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const { id } = req.params;
-        await scheduleService.deleteEmployee(id);
+        await scheduleService.deleteEmployee(req.params.id);
         res.status(204).send();
-      } catch (error) {
-        console.error("Delete employee error:", error);
-        res.status(500).json({
-          message: "Failed to delete employee",
-          detail: error.message,
-          code: error.code || "UNKNOWN_ERROR",
-        });
+      } catch (err: any) {
+        console.error("[DELETE /api/employees/:id] Error:", err);
+        res
+          .status(500)
+          .json({ message: "Failed to delete employee", detail: err.message });
       }
     }
   );
 
-  // Holiday routes
-  app.get("/api/holidays", async (req, res) => {
+  /* =====================================================
+   * HOLIDAYS
+   * ===================================================*/
+  app.get("/api/holidays", async (_req, res) => {
     try {
       const holidays = await scheduleService.getAllHolidays();
       res.json(holidays);
-    } catch (error) {
-      console.error("Get holidays error:", error);
-      res.status(500).json({
-        message: "Failed to get holidays",
-        detail: error.message,
-        code: error.code || "UNKNOWN_ERROR",
-      });
+    } catch (err: any) {
+      console.error("[GET /api/holidays] Error:", err);
+      res
+        .status(500)
+        .json({ message: "Failed to get holidays", detail: err.message });
     }
   });
 
@@ -154,22 +111,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const holidayData = insertHolidaySchema.parse(req.body);
-        const holiday = await scheduleService.createHoliday(holidayData);
+        const data = insertHolidaySchema.parse(req.body);
+        const holiday = await scheduleService.createHoliday(data);
         res.status(201).json(holiday);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Create holiday error:", error);
-          res.status(500).json({
-            message: "Failed to create holiday",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        console.error("[POST /api/holidays] Error:", err);
+        res
+          .status(500)
+          .json({ message: "Failed to create holiday", detail: err.message });
       }
     }
   );
@@ -179,41 +133,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const { id } = req.params;
-        await scheduleService.deleteHoliday(id);
+        await scheduleService.deleteHoliday(req.params.id);
         res.status(204).send();
-      } catch (error) {
-        console.error("Delete holiday error:", error);
-        res.status(500).json({
-          message: "Failed to delete holiday",
-          detail: error.message,
-          code: error.code || "UNKNOWN_ERROR",
-        });
+      } catch (err: any) {
+        console.error("[DELETE /api/holidays/:id] Error:", err);
+        res
+          .status(500)
+          .json({ message: "Failed to delete holiday", detail: err.message });
       }
     }
   );
 
-  // Vacation routes
+  /* =====================================================
+   * VACATIONS
+   * ===================================================*/
   app.get("/api/vacations", async (req, res) => {
     try {
       const year = parseInt(req.query.year as string);
-      const employeeId = req.query.employeeId as string;
-
+      const employeeId = req.query.employeeId as string | undefined;
       if (isNaN(year)) {
-        return res.status(400).json({
-          message: "Year parameter is required and must be a valid number",
-        });
+        return res
+          .status(400)
+          .json({ message: "Year parameter is required and must be a number" });
       }
-
       const vacations = await vacationService.list(year, employeeId);
       res.json(vacations);
-    } catch (error) {
-      console.error("Get vacations error:", error);
-      res.status(500).json({
-        message: "Failed to get vacations",
-        detail: error.message,
-        code: error.code || "UNKNOWN_ERROR",
-      });
+    } catch (err: any) {
+      console.error("[GET /api/vacations] Error:", err);
+      res
+        .status(500)
+        .json({ message: "Failed to get vacations", detail: err.message });
     }
   });
 
@@ -222,49 +171,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const vacationData = insertVacationSchema.parse(req.body);
-
-        // Get employee name
+        const data = insertVacationSchema.parse(req.body);
         const employees = await scheduleService.getAllEmployees();
-        const employee = employees.find(
-          (emp) => emp.id === vacationData.employeeId
-        );
-
+        const employee = employees.find((e) => e.id === data.employeeId);
         if (!employee) {
           return res
             .status(400)
             .json({ message: "Funcionário não encontrado" });
         }
-
-        const vacation = await vacationService.create(
-          vacationData,
-          employee.name
-        );
-
-        // Invalidate cache for affected months
-        const startMonth = new Date(vacation.startDate).getMonth() + 1;
-        const endMonth = new Date(vacation.endDate).getMonth() + 1;
-        // TODO: Invalidate schedule cache for affected months
-
+        const vacation = await vacationService.create(data, employee.name);
         res.status(201).json(vacation);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Create vacation error:", error);
-          const statusCode = error.message.includes("conflita")
-            ? 409
-            : error.message.includes("atravessar")
-            ? 400
-            : 500;
-          res.status(statusCode).json({
-            message: "Failed to create vacation",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        const status = err.message.includes("conflita")
+          ? 409
+          : err.message.includes("atravessar")
+          ? 400
+          : 500;
+        console.error("[POST /api/vacations] Error:", err);
+        res
+          .status(status)
+          .json({ message: "Failed to create vacation", detail: err.message });
       }
     }
   );
@@ -275,33 +206,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: AuthenticatedRequest, res) => {
       try {
         const { id } = req.params;
-        const updateData = updateVacationSchema.parse(req.body);
-
-        const vacation = await vacationService.update(id, updateData);
-
-        // TODO: Invalidate cache for affected months
-
+        const data = updateVacationSchema.parse(req.body);
+        const vacation = await vacationService.update(id, data);
         res.json(vacation);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Update vacation error:", error);
-          const statusCode = error.message.includes("conflita")
-            ? 409
-            : error.message.includes("atravessar")
-            ? 400
-            : error.message.includes("não encontrado")
-            ? 404
-            : 500;
-          res.status(statusCode).json({
-            message: "Failed to update vacation",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        const status = err.message.includes("conflita")
+          ? 409
+          : err.message.includes("atravessar")
+          ? 400
+          : err.message.includes("não encontrado")
+          ? 404
+          : 500;
+        console.error("[PATCH /api/vacations/:id] Error:", err);
+        res
+          .status(status)
+          .json({ message: "Failed to update vacation", detail: err.message });
       }
     }
   );
@@ -311,25 +235,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const { id } = req.params;
-        await vacationService.remove(id);
-
-        // TODO: Invalidate cache for affected months
-
+        await vacationService.remove(req.params.id);
         res.status(204).send();
-      } catch (error) {
-        console.error("Delete vacation error:", error);
-        const statusCode = error.message.includes("não encontrado") ? 404 : 500;
-        res.status(statusCode).json({
-          message: "Failed to delete vacation",
-          detail: error.message,
-          code: error.code || "UNKNOWN_ERROR",
-        });
+      } catch (err: any) {
+        const status = err.message.includes("não encontrado") ? 404 : 500;
+        console.error("[DELETE /api/vacations/:id] Error:", err);
+        res
+          .status(status)
+          .json({ message: "Failed to delete vacation", detail: err.message });
       }
     }
   );
 
-  // Schedule routes - NEW: Monthly consolidated approach
+  /* =====================================================
+   * SCHEDULE (GET + GENERATE + WEEKENDS + UPDATE DAY)
+   * ===================================================*/
+
+  // Retorna apenas array de days (ScheduleEntry[])
   app.get("/api/schedule/:year/:month", async (req, res) => {
     try {
       const year = parseInt(req.params.year);
@@ -340,115 +262,131 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid year or month" });
       }
 
-      const etag = req.headers["if-none-match"];
+      const ifNoneMatch = req.headers["if-none-match"] as string | undefined;
 
       try {
         const result = await scheduleService.getScheduleForMonth(
           year,
           month,
-          etag,
+          ifNoneMatch,
           forceRegenerate
         );
-
-        // Set ETag for caching
         res.set("ETag", result.etag);
         res.set("Cache-Control", "private, max-age=60");
-
-        // Log cache performance
-        console.log(
-          `[SCHEDULE] GET ${year}-${month}: ${
-            result.fromCache ? "CACHE HIT" : "CACHE MISS"
-          }`
-        );
-
         res.json(result.schedule);
-      } catch (error) {
-        if (error.message === "NOT_MODIFIED") {
+      } catch (err: any) {
+        if (err.message === "NOT_MODIFIED") {
           return res.status(304).send();
         }
-        throw error;
+        throw err;
       }
-    } catch (error) {
-      console.error("Get schedule error:", error);
-      res.status(500).json({
-        message: "Failed to get schedule",
-        detail: error.message,
-        code: error.code || "UNKNOWN_ERROR",
-      });
+    } catch (err: any) {
+      console.error("[GET /api/schedule/:year/:month] Error:", err);
+      res
+        .status(500)
+        .json({ message: "Failed to get schedule", detail: err.message });
     }
   });
 
-  // Schedule generation route (recria ou substitui a escala mensal)
+  // Gera / recria toda a escala mensal (dias úteis + limpa finais de semana)
   app.post(
     "/api/schedule/generate",
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
         const { year, month } = generateMonthlyScheduleSchema.parse(req.body);
-
-        const result = await scheduleService.getScheduleForMonth(
+        const monthly = await scheduleService.generateMonthlySchedule(
           year,
-          month,
-          undefined, // ETag não necessário na geração
-          true // forceRegenerate = true => sempre recria
+          month
         );
-
-        res.status(201).json(result.schedule);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+        // persiste substituindo o doc anterior
+        const docId = `schedule-${year}-${String(month).padStart(2, "0")}`;
+        await (scheduleService as any).schedulesCollection
+          .doc(docId)
+          .set(monthly);
+        // invalida cache
+        (scheduleService as any).scheduleCache?.delete?.(docId); // caso queira acessar internamente
+        res.status(201).json(monthly.days);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Generate schedule error:", error);
-          res.status(500).json({
-            message: "Failed to generate schedule",
-            detail: error.message,
-            code: error.code || "UNKNOWN_ERROR",
-          });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        console.error("[POST /api/schedule/generate] Error:", err);
+        res
+          .status(500)
+          .json({
+            message: "Failed to generate schedule",
+            detail: err.message,
+          });
       }
     }
   );
 
+  // Gera somente finais de semana (rotação)
+  app.post(
+    "/api/schedule/generate-weekends",
+    requireAuth,
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { year, month } = generateMonthlyScheduleSchema.parse(req.body);
+        const result = await scheduleService.generateWeekendSchedule(
+          year,
+          month
+        );
+        res.status(201).json(result);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
+            .status(400)
+            .json({ message: "Validation error", errors: err.errors });
+        }
+        console.error("[POST /api/schedule/generate-weekends] Error:", err);
+        res
+          .status(500)
+          .json({
+            message: "Failed to generate weekend schedule",
+            detail: err.message,
+          });
+      }
+    }
+  );
+
+  // Atualiza assignments de um dia
   app.patch(
     "/api/schedule/day/:date",
     requireAuth,
     async (req: AuthenticatedRequest, res) => {
       try {
         const { date } = req.params;
-        const { assignments } = req.body;
-
-        // Validate date format
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
           return res
             .status(400)
-            .json({ message: "Invalid date format. Use YYYY-MM-DD" });
+            .json({ message: "Invalid date format (YYYY-MM-DD expected)" });
         }
-
-        // Validate assignments and add IDs
-        const validatedAssignments = z
+        const validated = z
           .array(insertAssignmentSchema)
-          .parse(assignments);
-        const assignmentsWithIds = validatedAssignments.map((assignment) => ({
-          ...assignment,
-          id: `${assignment.employeeId}-${date}`,
+          .parse(req.body.assignments);
+        const withIds = validated.map((a) => ({
+          ...a,
+          id: `${a.employeeId}-${date}`,
         }));
-
-        const scheduleEntry = await scheduleService.updateDaySchedule(
-          date,
-          assignmentsWithIds
-        );
-        res.json(scheduleEntry);
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          res
+        const day = await scheduleService.updateDaySchedule(date, withIds);
+        res.json(day);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          return res
             .status(400)
-            .json({ message: "Validation error", errors: error.errors });
-        } else {
-          console.error("Update day schedule error:", error);
-          res.status(500).json({ message: "Failed to update day schedule" });
+            .json({ message: "Validation error", errors: err.errors });
         }
+        console.error("[PATCH /api/schedule/day/:date] Error:", err);
+        res
+          .status(500)
+          .json({
+            message: "Failed to update day schedule",
+            detail: err.message,
+          });
       }
     }
   );
