@@ -192,16 +192,12 @@ export class ScheduleService {
     );
     const employees = await this.getAllEmployees();
 
-    console.log("🎯 Funcionários ativos encontrados:", employees.length);
-
     const monthDays = getMonthDays(year, month);
-
     const days: ScheduleDay[] = monthDays.map((date) => {
       const dateStr = formatDate(date);
       const weekend = isWeekend(date);
       const holiday = isHolidayDate(date, holidayMap);
       const onVacationEmployeeIds = Array.from(vacationMap.get(dateStr) || []);
-
       return {
         date: dateStr,
         assignments: [],
@@ -211,54 +207,52 @@ export class ScheduleService {
       };
     });
 
-    // Revezamento entre dois funcionários
-    const weekendEmployees = employees.filter(
-      (e) => e.isActive && e.weekendRotation === true
-    );
+    // Funcionários com revezamento de finais de semana
+    const weekendEmployees = employees
+      .filter((e) => e.isActive && e.weekendRotation)
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     if (weekendEmployees.length < 2) {
       console.warn(
-        "⚠️ São necessários pelo menos dois funcionários com revezamento de fim de semana."
+        "⚠️ Precisamos de pelo menos dois funcionários para revezamento de final de semana."
       );
     }
 
-    // Garantir ordem estável de revezamento
-    weekendEmployees.sort((a, b) => a.name.localeCompare(b.name));
+    // Recupera o índice de rotação do mês anterior
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    let lastWeekendIndex = 0;
+    try {
+      const prevDoc = await this.schedulesCollection
+        .doc(getMonthlyScheduleId(prevYear, prevMonth))
+        .get();
+      if (prevDoc.exists) {
+        lastWeekendIndex =
+          (prevDoc.data() as MonthlySchedule).rotationState?.lastWeekendIndex ??
+          0;
+      }
+    } catch {
+      // sem schedule anterior → começa em zero
+    }
 
-    // Recuperar último estado de rotação
-    const previousMonth = month === 1 ? 12 : month - 1;
-    const previousYear = month === 1 ? year - 1 : year;
-    const previousSnap = await this.schedulesCollection
-      .doc(getMonthlyScheduleId(previousYear, previousMonth))
-      .get()
-      .catch(() => null);
+    let currentIndex = lastWeekendIndex;
 
-    const previousSchedule = previousSnap?.exists
-      ? (previousSnap.data() as MonthlySchedule)
-      : null;
+    // Primeiro atribui dias úteis e feriados, depois finais de semana
+    for (const day of days) {
+      const weekday = new Date(day.date).getDay();
+      const wkKey = WEEKDAY_KEYS[weekday];
+      const onVacation = day.onVacationEmployeeIds || [];
 
-    let lastSwap = previousSchedule?.rotationState?.lastSwap ?? false;
-
-    let swap = lastSwap;
-
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      const dateObj = new Date(day.date);
-      const weekdayIndex = dateObj.getDay();
-      const weekdayKey = WEEKDAY_KEYS[weekdayIndex];
-      const onVacationEmployeeIds = day.onVacationEmployeeIds || [];
-
+      // Dias úteis
       if (!day.isWeekend && !day.isHoliday) {
-        // Dias úteis
-        const availableEmployees = employees.filter(
+        const available = employees.filter(
           (e) =>
             e.isActive &&
-            e.workDays.includes(weekdayKey) &&
-            !onVacationEmployeeIds.includes(e.id)
+            e.workDays.includes(wkKey) &&
+            !onVacation.includes(e.id)
         );
-
-        for (const emp of availableEmployees) {
-          const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
+        for (const emp of available) {
+          const times = pickEmployeeDefaultTimes(emp, weekday);
           day.assignments.push({
             id: `${emp.id}-${day.date}`,
             employeeId: emp.id,
@@ -267,51 +261,39 @@ export class ScheduleService {
             endTime: normalizeTime(times.endTime),
           });
         }
-      } else if (day.isWeekend && weekendEmployees.length >= 2) {
-        // Sábado ou Domingo com revezamento alternado
-        const empA = weekendEmployees[0];
-        const empB = weekendEmployees[1];
-        const emp = (weekdayIndex === 6) === swap ? empA : empB;
-
-        if (!onVacationEmployeeIds.includes(emp.id)) {
-          const times = pickEmployeeDefaultTimes(emp, weekdayIndex);
+      }
+      // Finais de semana com revezamento numérico
+      else if (day.isWeekend && weekendEmployees.length >= 2) {
+        // pula quem estiver de férias
+        let chosen: Employee | null = null;
+        for (let attempt = 0; attempt < weekendEmployees.length; attempt++) {
+          const cand = weekendEmployees[currentIndex % weekendEmployees.length];
+          if (!onVacation.includes(cand.id)) {
+            chosen = cand;
+            break;
+          }
+          currentIndex++;
+        }
+        if (chosen) {
+          const times = pickEmployeeDefaultTimes(chosen, weekday);
           day.assignments.push({
-            id: `${emp.id}-${day.date}`,
-            employeeId: emp.id,
-            employeeName: emp.name,
+            id: `${chosen.id}-${day.date}`,
+            employeeId: chosen.id,
+            employeeName: chosen.name,
             startTime: normalizeTime(times.startTime),
             endTime: normalizeTime(times.endTime),
           });
-        }
-
-        if (weekdayIndex === 0) {
-          // domingo → troca revezamento da semana seguinte
-          swap = !swap;
+          currentIndex++;
         }
       }
     }
 
-    const totalAssignments = days.reduce(
-      (sum, d) => sum + d.assignments.length,
-      0
-    );
-    console.log(`✅ Escala gerada com ${totalAssignments} atribuições.`);
-
-    if (totalAssignments === 0) {
-      console.warn(
-        "⚠️ Nenhuma atribuição gerada! Verifique se os funcionários possuem workDays válidos."
-      );
-    }
-
     const now = new Date().toISOString();
-
     return {
       year,
       month,
       days,
-      rotationState: {
-        lastSwap: swap,
-      },
+      rotationState: { lastWeekendIndex: currentIndex },
       generatedAt: now,
       updatedAt: now,
       version: 1,
