@@ -15,13 +15,14 @@ import {
   useHolidays,
   useGenerateMonthlySchedule,
 } from "@/hooks/useSchedule";
+import { useVacations } from "@/hooks/useVacations";
 import { useToast } from "@/hooks/use-toast";
 import DayEditModal from "@/components/modals/DayEditModal";
 import {
   isWeekend as utilIsWeekend,
   isHoliday as utilIsHoliday,
 } from "@shared/schema";
-import { formatDateKey, getCurrentDateKey } from "@shared/utils/date";
+import { formatDateKey, getCurrentDateKey } from "@/shared/utils/date";
 
 interface CalendarDay {
   date: Date;
@@ -49,6 +50,7 @@ export default function SchedulePage() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
 
+  // Escala mensal
   const {
     data: scheduleEntries = [],
     isLoading: scheduleLoading,
@@ -56,8 +58,13 @@ export default function SchedulePage() {
     error: scheduleError,
   } = useSchedule(year, month);
 
+  // Feriados recorrentes
   const { data: holidays = [], isLoading: holidaysLoading } = useHolidays();
 
+  // Períodos de férias
+  const { data: vacations = [] } = useVacations(year);
+
+  // Geração de escala
   const generateSchedule = useGenerateMonthlySchedule();
 
   const formatMonthYear = (date: Date) =>
@@ -94,7 +101,6 @@ export default function SchedulePage() {
     const arr: Array<{ name: string; date: Date }> = [];
 
     holidays.forEach((h: any) => {
-      // holiday.date no backend está Normalizado "MM-DD"
       if (!h.date) return;
       const [m, d] = h.date.split("-").map(Number);
       let holidayDate = new Date(currentYear, m - 1, d);
@@ -109,12 +115,26 @@ export default function SchedulePage() {
     return arr.sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 3);
   }, [holidays]);
 
+  /* ================= Próximas Férias dos Funcionários ================= */
+  const nextVacations = useMemo(() => {
+    const today = new Date();
+    // ordenar por data de início mais próxima
+    return vacations
+      .map((v) => ({
+        ...v,
+        start: new Date(v.startDate),
+      }))
+      .filter((v) => v.start >= today)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .slice(0, 3);
+  }, [vacations]);
+
   /* ================= Navegação de Mês ================= */
-  const navigateMonth = (dir: "prev" | "next") => {
+  const navigateMonth = (direction: "prev" | "next") => {
     setCurrentDate((prev) => {
-      const n = new Date(prev);
-      n.setMonth(prev.getMonth() + (dir === "prev" ? -1 : 1));
-      return n;
+      const next = new Date(prev);
+      next.setMonth(prev.getMonth() + (direction === "prev" ? -1 : 1));
+      return next;
     });
   };
 
@@ -161,6 +181,7 @@ export default function SchedulePage() {
       const entry = scheduleEntries.find((e: any) => e.date === dateString);
       const isToday = iter.toDateString() === new Date().toDateString();
       const holiday = utilIsHoliday(iter, holidays);
+
       result.push({
         date: new Date(iter),
         dateString,
@@ -171,6 +192,7 @@ export default function SchedulePage() {
         holiday,
         assignments: entry?.assignments || [],
       });
+
       iter.setDate(iter.getDate() + 1);
     }
     return result;
@@ -210,11 +232,11 @@ export default function SchedulePage() {
     });
   };
 
-  const navigateWeek = (dir: "prev" | "next") => {
+  const navigateWeek = (direction: "prev" | "next") => {
     setSelectedWeekStart((prev) => {
-      const n = new Date(prev);
-      n.setDate(prev.getDate() + (dir === "prev" ? -7 : 7));
-      return n;
+      const next = new Date(prev);
+      next.setDate(prev.getDate() + (direction === "prev" ? -7 : 7));
+      return next;
     });
   };
 
@@ -288,8 +310,8 @@ export default function SchedulePage() {
           )}
         </div>
 
+        {/* Controles de visão e geração */}
         <div className="flex items-center space-x-4">
-          {/* Toggle View */}
           <div className="bg-white rounded-lg border border-gray-200 p-1 flex">
             <Button
               variant={viewMode === "month" ? "default" : "ghost"}
@@ -316,8 +338,6 @@ export default function SchedulePage() {
               Dia
             </Button>
           </div>
-
-          {/* Month Navigation */}
           <div className="flex items-center space-x-2">
             <Button
               variant="ghost"
@@ -356,25 +376,21 @@ export default function SchedulePage() {
               Hoje
             </Button>
           </div>
-
-          {/* Generate Buttons */}
           {user && (
-            <div className="flex space-x-2">
-              <Button
-                onClick={handleGenerateSchedule}
-                disabled={generateSchedule.isPending}
-                className="bg-brand hover:bg-brand-dark text-white"
-              >
-                <Calendar className="mr-2" size={16} />
-                {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
-              </Button>
-            </div>
+            <Button
+              onClick={handleGenerateSchedule}
+              disabled={generateSchedule.isPending}
+              className="bg-brand hover:bg-brand-dark text-white"
+            >
+              <Calendar className="mr-2" size={16} />
+              {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
+            </Button>
           )}
         </div>
       </div>
 
-      {/* Painéis Laterais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Painéis Laterais: 3 colunas */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Próximos Finais de Semana */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
@@ -440,12 +456,49 @@ export default function SchedulePage() {
             </div>
           )}
         </div>
+
+        {/* Próximas Férias dos Funcionários */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Info className="mr-2 text-brand" size={20} />
+            Férias dos Funcionários
+          </h3>
+          {nextVacations.length === 0 ? (
+            <p className="text-gray-500">Nenhuma férias futura cadastrada</p>
+          ) : (
+            <div className="space-y-3">
+              {nextVacations.map((v, i) => (
+                <div
+                  key={i}
+                  className="border-l-4 border-l-blue-400 pl-4 py-2 bg-blue-50/40 rounded"
+                >
+                  <div className="font-medium text-gray-900">
+                    {v.employeeName}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {new Date(v.startDate).toLocaleDateString("pt-BR", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}{" "}
+                    –{" "}
+                    {new Date(v.endDate).toLocaleDateString("pt-BR", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ===== Month View ===== */}
       {viewMode === "month" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          {/* Weekday Header */}
+          {/* Cabeçalho das Semanas */}
           <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
             {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
               <div
@@ -456,12 +509,12 @@ export default function SchedulePage() {
               </div>
             ))}
           </div>
-          {/* Days */}
+          {/* Dias do Mês */}
           <div className="grid grid-cols-7 divide-x divide-gray-200">
             {calendarDays.map((day, idx) => {
-              const baseCls =
+              const baseClass =
                 "h-32 p-2 cursor-pointer transition-colors border-b border-gray-100 relative";
-              const visualCls = !day.isCurrentMonth
+              const visualClass = !day.isCurrentMonth
                 ? "bg-gray-50/50 text-gray-400"
                 : day.isToday
                 ? "border-l-4 border-l-brand bg-brand/5"
@@ -474,7 +527,7 @@ export default function SchedulePage() {
               return (
                 <div
                   key={idx}
-                  className={`${baseCls} ${visualCls}`}
+                  className={`${baseClass} ${visualClass}`}
                   onClick={() => handleDayClick(day)}
                 >
                   <div className="flex justify-between items-start mb-2">
@@ -500,13 +553,11 @@ export default function SchedulePage() {
                       <Calendar className="text-brand" size={12} />
                     )}
                   </div>
-
                   {day.holiday && (
-                    <div className="text-[10px] leading-tight text-brand font-medium mb-1 line-clamp-2">
+                    <div className="text-[10px] text-brand font-medium mb-1 line-clamp-2">
                       {day.holiday.name}
                     </div>
                   )}
-
                   <div className="space-y-1">
                     {day.assignments.slice(0, 2).map((a, i) => (
                       <div
@@ -584,7 +635,7 @@ export default function SchedulePage() {
                       {day.day}
                     </div>
                     {day.holiday && (
-                      <div className="text-[10px] text-brand font-medium mt-1 line-clamp-2">
+                      <div className="text-[10px] text-brand font-medium mt-1">
                         {day.holiday.name}
                       </div>
                     )}

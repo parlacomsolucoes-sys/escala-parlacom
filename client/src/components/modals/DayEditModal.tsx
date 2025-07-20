@@ -3,11 +3,17 @@ import { X, Plus, Edit, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useEmployees, useUpdateDaySchedule } from "@/hooks/useSchedule";
-import type { Assignment, InsertAssignment } from "@shared/schema";
+import type { Assignment } from "@shared/schema";
 import { normalizeTime } from "@shared/schema";
 
 interface DayEditModalProps {
@@ -18,17 +24,24 @@ interface DayEditModalProps {
   onVacationEmployeeIds?: string[];
 }
 
-export default function DayEditModal({ isOpen, onClose, date, assignments, onVacationEmployeeIds = [] }: DayEditModalProps) {
+export default function DayEditModal({
+  isOpen,
+  onClose,
+  date,
+  assignments,
+  onVacationEmployeeIds = [],
+}: DayEditModalProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: employees = [] } = useEmployees();
   const updateDaySchedule = useUpdateDaySchedule();
-  
-  const [currentAssignments, setCurrentAssignments] = useState<Assignment[]>(assignments);
+
+  const [currentAssignments, setCurrentAssignments] =
+    useState<Assignment[]>(assignments);
   const [newAssignment, setNewAssignment] = useState({
     employeeId: "",
     startTime: "",
-    endTime: ""
+    endTime: "",
   });
 
   useEffect(() => {
@@ -38,18 +51,22 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
   if (!isOpen) return null;
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('pt-BR', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    const date = new Date(dateString + "T00:00:00");
+    return date.toLocaleDateString("pt-BR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
     });
   };
 
   const handleAddAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!newAssignment.employeeId || !newAssignment.startTime || !newAssignment.endTime) {
+
+    if (
+      !newAssignment.employeeId ||
+      !newAssignment.startTime ||
+      !newAssignment.endTime
+    ) {
       toast({
         title: "Campos obrigatórios",
         description: "Preencha todos os campos",
@@ -58,37 +75,39 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
       return;
     }
 
-    const employee = employees.find(emp => emp.id === newAssignment.employeeId);
+    const employee = employees.find(
+      (emp) => emp.id === newAssignment.employeeId
+    );
     if (!employee) {
-      toast({
-        title: "Funcionário não encontrado",
-        variant: "destructive",
-      });
+      toast({ title: "Funcionário não encontrado", variant: "destructive" });
       return;
     }
 
     const assignment: Assignment = {
-      id: Date.now().toString(),
+      id: `${employee.id}-${date}`,
       employeeId: newAssignment.employeeId,
       employeeName: employee.name,
       startTime: normalizeTime(newAssignment.startTime),
-      endTime: normalizeTime(newAssignment.endTime)
+      endTime: normalizeTime(newAssignment.endTime),
     };
 
-    const updatedAssignments = [...currentAssignments, assignment];
+    const updatedAssignments = [
+      ...currentAssignments.filter(
+        (a) => a.employeeId !== assignment.employeeId
+      ),
+      assignment,
+    ];
     setCurrentAssignments(updatedAssignments);
-    
+
     try {
       await updateDaySchedule.mutateAsync({
         date,
-        assignments: updatedAssignments
+        assignments: updatedAssignments,
       });
-      
       toast({
         title: "Escala atualizada",
         description: "Escala foi atualizada com sucesso",
       });
-      
       setNewAssignment({ employeeId: "", startTime: "", endTime: "" });
     } catch (error) {
       toast({
@@ -100,16 +119,17 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
     }
   };
 
-  const handleRemoveAssignment = async (assignmentId: string) => {
-    const updatedAssignments = currentAssignments.filter(a => a.id !== assignmentId);
+  const handleRemoveAssignment = async (employeeId: string) => {
+    const updatedAssignments = currentAssignments.filter(
+      (a) => a.employeeId !== employeeId
+    );
     setCurrentAssignments(updatedAssignments);
-    
+
     try {
       await updateDaySchedule.mutateAsync({
         date,
-        assignments: updatedAssignments
+        assignments: updatedAssignments,
       });
-      
       toast({
         title: "Escala atualizada",
         description: "Escala foi atualizada com sucesso",
@@ -125,13 +145,11 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
   };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose();
-    }
+    if (e.target === e.currentTarget) onClose();
   };
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
       onClick={handleBackdropClick}
     >
@@ -139,7 +157,8 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-gray-900">
-              Editar Escala - <span className="text-brand">{formatDate(date)}</span>
+              Editar Escala -{" "}
+              <span className="text-brand">{formatDate(date)}</span>
             </h3>
             <Button
               variant="ghost"
@@ -150,67 +169,89 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
               <X size={20} />
             </Button>
           </div>
-          
-          {/* Current Assignments */}
+
+          {/* Escalas Atuais */}
           <div className="mb-6">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Escalas Atuais</h4>
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">
+              Escalas Atuais
+            </h4>
             <div className="space-y-3">
               {currentAssignments.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">Nenhuma escala para este dia</p>
+                <p className="text-gray-500 text-center py-4">
+                  Nenhuma escala para este dia
+                </p>
               ) : (
                 currentAssignments.map((assignment) => (
-                  <div key={assignment.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div
+                    key={assignment.employeeId}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  >
                     <div className="flex items-center space-x-3">
                       <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
                         <User className="text-blue-600" size={16} />
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900">{assignment.employeeName}</p>
-                        <p className="text-sm text-gray-600">{assignment.startTime} - {assignment.endTime}</p>
+                        <p className="font-medium text-gray-900">
+                          {assignment.employeeName}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {assignment.startTime} - {assignment.endTime}
+                        </p>
                       </div>
                     </div>
                     {user && (
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveAssignment(assignment.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 size={16} />
-                        </Button>
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          handleRemoveAssignment(assignment.employeeId)
+                        }
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 size={16} />
+                      </Button>
                     )}
                   </div>
                 ))
               )}
             </div>
           </div>
-          
-          {/* Employees on Vacation */}
+
+          {/* Férias */}
           {onVacationEmployeeIds.length > 0 && (
             <div className="mb-6">
-              <h4 className="text-lg font-semibold text-gray-900 mb-4">Funcionários em Férias</h4>
+              <h4 className="text-lg font-semibold text-gray-900 mb-4">
+                Funcionários em Férias
+              </h4>
               <div className="space-y-2">
                 {employees
-                  .filter(emp => onVacationEmployeeIds.includes(emp.id))
+                  .filter((emp) => onVacationEmployeeIds.includes(emp.id))
                   .map((employee) => (
-                    <div key={employee.id} className="flex items-center p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div
+                      key={employee.id}
+                      className="flex items-center p-3 bg-yellow-50 border border-yellow-200 rounded-lg"
+                    >
                       <div className="h-6 w-6 rounded-full bg-yellow-100 flex items-center justify-center mr-3">
                         <User className="text-yellow-600" size={14} />
                       </div>
-                      <span className="text-sm font-medium text-yellow-800">{employee.name}</span>
-                      <span className="text-xs text-yellow-600 ml-2">(em férias)</span>
+                      <span className="text-sm font-medium text-yellow-800">
+                        {employee.name}
+                      </span>
+                      <span className="text-xs text-yellow-600 ml-2">
+                        (em férias)
+                      </span>
                     </div>
                   ))}
               </div>
             </div>
           )}
-          
-          {/* Add New Assignment (Admin Only) */}
+
+          {/* Adicionar Escala */}
           {user && (
             <div className="border-t pt-6">
-              <h4 className="text-lg font-semibold text-gray-900 mb-4">Adicionar Escala</h4>
+              <h4 className="text-lg font-semibold text-gray-900 mb-4">
+                Adicionar Escala
+              </h4>
               <form onSubmit={handleAddAssignment} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
@@ -219,14 +260,23 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
                     </Label>
                     <Select
                       value={newAssignment.employeeId}
-                      onValueChange={(value) => setNewAssignment(prev => ({ ...prev, employeeId: value }))}
+                      onValueChange={(value) =>
+                        setNewAssignment((prev) => ({
+                          ...prev,
+                          employeeId: value,
+                        }))
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecionar..." />
                       </SelectTrigger>
                       <SelectContent>
                         {employees
-                          .filter(emp => emp.isActive && !onVacationEmployeeIds.includes(emp.id))
+                          .filter(
+                            (emp) =>
+                              emp.isActive &&
+                              !onVacationEmployeeIds.includes(emp.id)
+                          )
                           .map((employee) => (
                             <SelectItem key={employee.id} value={employee.id}>
                               {employee.name}
@@ -240,10 +290,14 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
                       Início
                     </Label>
                     <Input
-                      type="text"
-                      placeholder="08:00"
+                      type="time"
                       value={newAssignment.startTime}
-                      onChange={(e) => setNewAssignment(prev => ({ ...prev, startTime: e.target.value }))}
+                      onChange={(e) =>
+                        setNewAssignment((prev) => ({
+                          ...prev,
+                          startTime: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                   <div>
@@ -251,20 +305,19 @@ export default function DayEditModal({ isOpen, onClose, date, assignments, onVac
                       Fim
                     </Label>
                     <Input
-                      type="text"
-                      placeholder="18:00"
+                      type="time"
                       value={newAssignment.endTime}
-                      onChange={(e) => setNewAssignment(prev => ({ ...prev, endTime: e.target.value }))}
+                      onChange={(e) =>
+                        setNewAssignment((prev) => ({
+                          ...prev,
+                          endTime: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                 </div>
-                
                 <div className="flex justify-end space-x-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={onClose}
-                  >
+                  <Button type="button" variant="ghost" onClick={onClose}>
                     Cancelar
                   </Button>
                   <Button
