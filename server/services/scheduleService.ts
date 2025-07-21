@@ -1,3 +1,5 @@
+// src/services/scheduleService.ts
+
 import { adminDb } from "../firebase-admin";
 import type {
   Employee,
@@ -25,15 +27,7 @@ const scheduleCache = new Map<
 >();
 const CACHE_TTL_MS = 60_000;
 
-const WEEKDAY_KEYS: Array<
-  | "sunday"
-  | "monday"
-  | "tuesday"
-  | "wednesday"
-  | "thursday"
-  | "friday"
-  | "saturday"
-> = [
+const WEEKDAY_KEYS = [
   "sunday",
   "monday",
   "tuesday",
@@ -41,24 +35,25 @@ const WEEKDAY_KEYS: Array<
   "thursday",
   "friday",
   "saturday",
-];
+] as const;
 
 export class ScheduleService {
   private employeesCollection = adminDb.collection("employees");
   private holidaysCollection = adminDb.collection("holidays");
   private schedulesCollection = adminDb.collection("schedules");
 
-  /** Clear *all* cached months so next fetch regenerates from scratch */
-  private clearCache() {
+  /** Limpa todo cache para forçar rebuild de escalas */
+  clearCache() {
     scheduleCache.clear();
   }
 
   /* ================= EMPLOYEES ================= */
+
   async getAllEmployees(): Promise<Employee[]> {
     const snapshot = await this.employeesCollection.get();
     return snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as Omit<Employee, "id">),
     })) as Employee[];
   }
 
@@ -74,8 +69,6 @@ export class ScheduleService {
       updatedAt: now,
     };
     await docRef.set(newEmployee);
-
-    // clear any existing schedule so on next GET it's rebuilt
     this.clearCache();
     return newEmployee;
   }
@@ -91,9 +84,8 @@ export class ScheduleService {
     };
     await docRef.update(updateData);
     const doc = await docRef.get();
-
     this.clearCache();
-    return { id: doc.id, ...doc.data() } as Employee;
+    return { id: doc.id, ...(doc.data() as Omit<Employee, "id">) } as Employee;
   }
 
   async deleteEmployee(id: string): Promise<void> {
@@ -102,11 +94,12 @@ export class ScheduleService {
   }
 
   /* ================= HOLIDAYS ================= */
+
   async getAllHolidays(): Promise<Holiday[]> {
     const snapshot = await this.holidaysCollection.get();
     return snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as Omit<Holiday, "id">),
     })) as Holiday[];
   }
 
@@ -115,11 +108,11 @@ export class ScheduleService {
     date: string;
     description?: string;
   }): Promise<Holiday> {
-    let mmddDate = data.date;
+    let mmdd = data.date;
     if (data.date.length === 10 && data.date.includes("-")) {
-      mmddDate = data.date.substring(5);
+      mmdd = data.date.substring(5);
     }
-    const [mStr, dStr] = mmddDate.split("-");
+    const [mStr, dStr] = mmdd.split("-");
     const month = parseInt(mStr, 10);
     const day = parseInt(dStr, 10);
 
@@ -128,7 +121,7 @@ export class ScheduleService {
     const newHoliday: Holiday = {
       id: docRef.id,
       name: data.name,
-      date: mmddDate,
+      date: mmdd,
       description: data.description,
       month,
       day,
@@ -136,7 +129,6 @@ export class ScheduleService {
       updatedAt: now,
     };
     await docRef.set(newHoliday);
-
     this.clearCache();
     return newHoliday;
   }
@@ -147,6 +139,11 @@ export class ScheduleService {
   }
 
   /* ================= SCHEDULE ================= */
+
+  /**
+   * Busca ou gera a escala do mês.
+   * Se forceRegenerate for true, sempre gera nova e sobrescreve o Firestore.
+   */
   async getScheduleForMonth(
     year: number,
     month: number,
@@ -158,7 +155,7 @@ export class ScheduleService {
     if (!forceRegenerate) {
       const cached = scheduleCache.get(docId);
       if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-        if (etag && etag === cached.etag) {
+        if (etag === cached.etag) {
           throw new Error("NOT_MODIFIED");
         }
         return {
@@ -194,6 +191,9 @@ export class ScheduleService {
     };
   }
 
+  /**
+   * Gera uma nova escala mensal do zero, respeitando férias e alternância de finais de semana.
+   */
   private async createMonthlySchedule(
     year: number,
     month: number
@@ -209,46 +209,46 @@ export class ScheduleService {
     const monthDays = getMonthDays(year, month);
     const days: ScheduleDay[] = monthDays.map((date) => {
       const dateStr = formatDate(date);
-      const weekend = isWeekend(date);
-      const holiday = isHolidayDate(date, holidayMap);
-      const onVacationEmployeeIds = Array.from(vacationMap.get(dateStr) || []);
+      const isWkd = isWeekend(date);
+      const isHol = isHolidayDate(date, holidayMap);
+      const onVacIds = Array.from(vacationMap.get(dateStr) || []);
       return {
         date: dateStr,
         assignments: [],
-        isWeekend: weekend,
-        isHoliday: holiday,
-        ...(onVacationEmployeeIds.length > 0 ? { onVacationEmployeeIds } : {}),
+        isWeekend: isWkd,
+        isHoliday: isHol,
+        ...(onVacIds.length > 0 ? { onVacationEmployeeIds: onVacIds } : {}),
       };
     });
 
-    // --- WEEKEND ROTATION LOGIC ---
-    const weekendEmployees = employees
+    // --- LÓGICA DE REVEZAMENTO DOS FINAIS DE SEMANA ----
+
+    const weekendEmps = employees
       .filter((e) => e.isActive && e.weekendRotation)
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // pull lastSwap from previous month if present
+    // Recupera último estado de swap do mês anterior
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
     const prevSnap = await this.schedulesCollection
       .doc(getMonthlyScheduleId(prevYear, prevMonth))
       .get()
       .catch(() => null);
-    const prevSchedule = prevSnap?.exists
+    const prevMonthly = prevSnap?.exists
       ? (prevSnap.data() as MonthlySchedule)
       : null;
-    let swap = prevSchedule?.rotationState?.lastSwap ?? false;
+    let swap = prevMonthly?.rotationState?.lastSwap ?? false;
 
     for (const day of days) {
-      const idx = new Date(day.date).getDay(); // 0 = Sunday, 6 = Saturday
-      const onVacation = day.onVacationEmployeeIds || [];
+      const idx = new Date(day.date).getDay(); // 0=domingo,6=sábado
+      const onVac = day.onVacationEmployeeIds || [];
 
-      if (day.isWeekend && weekendEmployees.length >= 2) {
-        // Saturday (6) and Sunday (0)
-        const [A, B] = weekendEmployees;
-        // if Saturday: weekdayIndex === 6
-        // emp = (6 === 6) === swap ? A : B
+      // finais de semana
+      if (day.isWeekend && weekendEmps.length >= 2) {
+        const [A, B] = weekendEmps;
+        // se for sábado (6) e swap=false, pega A; se swap=true, pega B. Domingo inverte a condição.
         const emp = (idx === 6) === swap ? A : B;
-        if (!onVacation.includes(emp.id)) {
+        if (!onVac.includes(emp.id)) {
           const times = pickEmployeeDefaultTimes(emp, idx);
           day.assignments.push({
             id: `${emp.id}-${day.date}`,
@@ -258,25 +258,34 @@ export class ScheduleService {
             endTime: normalizeTime(times.endTime),
           });
         }
-        // only flip swap after Sunday
-        if (idx === 0) swap = !swap;
-      } else if (!day.isWeekend && !day.isHoliday) {
-        // weekday fill
-        const key = WEEKDAY_KEYS[idx];
-        const avail = employees.filter(
-          (e) =>
-            e.isActive && e.workDays.includes(key) && !onVacation.includes(e.id)
-        );
-        for (const emp of avail) {
-          const times = pickEmployeeDefaultTimes(emp, idx);
-          day.assignments.push({
-            id: `${emp.id}-${day.date}`,
-            employeeId: emp.id,
-            employeeName: emp.name,
-            startTime: normalizeTime(times.startTime),
-            endTime: normalizeTime(times.endTime),
-          });
+        // após domingo (0), inverte para próxima semana
+        if (idx === 0) {
+          swap = !swap;
         }
+      }
+      // dias úteis
+      else if (!day.isWeekend && !day.isHoliday) {
+        const key = WEEKDAY_KEYS[new Date(day.date).getDay()];
+        employees
+          .filter(
+            (e) =>
+              e.isActive &&
+              e.workDays.includes(key) &&
+              !(day.onVacationEmployeeIds || []).includes(e.id)
+          )
+          .forEach((emp) => {
+            const times = pickEmployeeDefaultTimes(
+              emp,
+              new Date(day.date).getDay()
+            );
+            day.assignments.push({
+              id: `${emp.id}-${day.date}`,
+              employeeId: emp.id,
+              employeeName: emp.name,
+              startTime: normalizeTime(times.startTime),
+              endTime: normalizeTime(times.endTime),
+            });
+          });
       }
     }
 
@@ -292,7 +301,10 @@ export class ScheduleService {
     };
   }
 
-  /** Update a single day (manually) */
+  /**
+   * Atualiza manualmente as assignments de um dia
+   * e limpa cache daquele mês.
+   */
   async updateDaySchedule(
     date: string,
     assignments: Assignment[]
@@ -301,25 +313,27 @@ export class ScheduleService {
     const docId = getMonthlyScheduleId(y, m);
     const docRef = this.schedulesCollection.doc(docId);
     const snap = await docRef.get();
-    if (!snap.exists) throw new Error(`Schedule not found: ${docId}`);
-
+    if (!snap.exists) {
+      throw new Error(`Schedule não encontrado para ${docId}`);
+    }
     const monthly = snap.data() as MonthlySchedule;
     const idx = monthly.days.findIndex((d) => d.date === date);
-    if (idx === -1) throw new Error(`Day ${date} not in schedule`);
+    if (idx === -1) {
+      throw new Error(`Dia ${date} não encontrado na escala`);
+    }
 
-    // validate no one on vacation
+    // valida se alguém está de férias
     for (const a of assignments) {
-      const onVac = await vacationService.isEmployeeOnVacation(
-        a.employeeId,
-        date
-      );
-      if (onVac) throw new Error("Funcionário em férias neste dia");
+      if (await vacationService.isEmployeeOnVacation(a.employeeId, date)) {
+        throw new Error("Funcionário em férias neste dia");
+      }
     }
 
     monthly.days[idx].assignments = assignments;
     monthly.updatedAt = new Date().toISOString();
     await docRef.set(monthly);
-    // clear this month from cache
+
+    // limpa cache só deste mês
     scheduleCache.delete(docId);
     return monthly.days[idx];
   }

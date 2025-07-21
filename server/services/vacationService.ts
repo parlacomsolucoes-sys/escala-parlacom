@@ -1,3 +1,5 @@
+// src/services/vacationService.ts
+
 import { adminDb } from "../firebase-admin";
 import type { Vacation, InsertVacation } from "@shared/schema";
 import { scheduleService } from "./scheduleService";
@@ -5,56 +7,53 @@ import { scheduleService } from "./scheduleService";
 export class VacationService {
   private vacationsCollection = adminDb.collection("vacations");
 
-  /** Clear all cached schedules so they’ll rebuild with fresh data */
+  /** Limpa cache de escalas para forçar rebuild com férias atualizadas */
   private clearSchedulesCache() {
-    // The clearCache method on scheduleService is private, so we cast to any
-    (scheduleService as any).clearCache();
+    // clearCache é público em scheduleService
+    scheduleService.clearCache();
   }
 
-  /** List vacations for a given year, optionally filtered by employee */
+  /** Lista todos os períodos de férias de um ano, opcionalmente filtrando por funcionário */
   async list(year: number, employeeId?: string): Promise<Vacation[]> {
     const snapshot = await this.vacationsCollection.get();
     let all = snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as Omit<Vacation, "id">),
     })) as Vacation[];
 
-    // Filter by year
+    // filtra pelo ano
     all = all.filter((v) => v.year === year);
 
-    // Filter by employee if requested
+    // filtra por funcionário, se informado
     if (employeeId) {
       all = all.filter((v) => v.employeeId === employeeId);
     }
 
-    // Sort by start date
+    // ordena por data de início
     all.sort((a, b) => a.startDate.localeCompare(b.startDate));
     return all;
   }
 
-  /** Create a new vacation period */
+  /** Cria um novo período de férias */
   async create(data: InsertVacation, employeeName: string): Promise<Vacation> {
-    // Validate date order
     const start = new Date(data.startDate);
     const end = new Date(data.endDate);
+
     if (start > end) {
       throw new Error(
         "Data de início deve ser anterior ou igual à data de fim"
       );
     }
-
-    // Ensure same year
     if (start.getFullYear() !== end.getFullYear()) {
       throw new Error(
         "Período de férias não pode atravessar anos. Divida em dois registros."
       );
     }
 
-    // Check for overlaps
     await this.checkOverlap(data.employeeId, data.startDate, data.endDate);
 
-    // Build the vacation record
     const docRef = this.vacationsCollection.doc();
+    const now = new Date().toISOString();
     const vacation: Vacation = {
       id: docRef.id,
       employeeId: data.employeeId,
@@ -63,83 +62,69 @@ export class VacationService {
       startDate: data.startDate,
       endDate: data.endDate,
       notes: data.notes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
 
-    // Persist
     await docRef.set(vacation);
-
-    // Clear schedule cache so next fetch rebuilds around this new vacation
     this.clearSchedulesCache();
-
     return vacation;
   }
 
-  /** Update an existing vacation period */
+  /** Atualiza um período de férias existente */
   async update(id: string, data: Partial<InsertVacation>): Promise<Vacation> {
     const docRef = this.vacationsCollection.doc(id);
-    const docSnap = await docRef.get();
-    if (!docSnap.exists) {
+    const snap = await docRef.get();
+    if (!snap.exists) {
       throw new Error("Período de férias não encontrado");
     }
+    const existing = snap.data() as Vacation;
 
-    const existing = docSnap.data() as Vacation;
-
-    // If dates are changing, re-validate
+    // datas novas
     const newStart = data.startDate ?? existing.startDate;
     const newEnd = data.endDate ?? existing.endDate;
-    const startDate = new Date(newStart);
-    const endDate = new Date(newEnd);
+    const start = new Date(newStart);
+    const end = new Date(newEnd);
 
-    if (startDate > endDate) {
+    if (start > end) {
       throw new Error(
         "Data de início deve ser anterior ou igual à data de fim"
       );
     }
-    if (startDate.getFullYear() !== endDate.getFullYear()) {
+    if (start.getFullYear() !== end.getFullYear()) {
       throw new Error(
         "Período de férias não pode atravessar anos. Divida em dois registros."
       );
     }
 
-    // Check overlap excluding this record
     await this.checkOverlap(existing.employeeId, newStart, newEnd, id);
 
-    // Prepare update payload
     const updatePayload: Partial<Vacation> = {
       ...data,
-      year: startDate.getFullYear(),
+      year: start.getFullYear(),
       updatedAt: new Date().toISOString(),
     };
 
-    // Apply update
     await docRef.update(updatePayload);
-
     const updatedSnap = await docRef.get();
     const updated = updatedSnap.data() as Vacation;
 
-    // Clear schedule cache due to changed vacation
     this.clearSchedulesCache();
-
     return { id, ...updated };
   }
 
-  /** Remove a vacation period */
+  /** Remove um período de férias */
   async remove(id: string): Promise<void> {
     const docRef = this.vacationsCollection.doc(id);
-    const docSnap = await docRef.get();
-    if (!docSnap.exists) {
+    const snap = await docRef.get();
+    if (!snap.exists) {
       throw new Error("Período de férias não encontrado");
     }
-
     await docRef.delete();
-
-    // Clear schedule cache
     this.clearSchedulesCache();
   }
 
-  /** Check if an employee is on vacation on a specific date */
+  /** Verifica se funcionário está de férias em uma data específica */
   async isEmployeeOnVacation(
     employeeId: string,
     dateString: string
@@ -162,7 +147,7 @@ export class VacationService {
     return false;
   }
 
-  /** Build a map of dates to sets of employeeIds on vacation in that month */
+  /** Mapeia cada dia do mês para o conjunto de funcionários de férias naquele dia */
   async getEmployeesOnVacationForMonth(
     year: number,
     month: number
@@ -179,7 +164,6 @@ export class VacationService {
       const vacStart = new Date(vac.startDate);
       const vacEnd = new Date(vac.endDate);
 
-      // If the vacation overlaps this month
       if (vacEnd >= monthStart && vacStart <= monthEnd) {
         const start = vacStart < monthStart ? monthStart : vacStart;
         const end = vacEnd > monthEnd ? monthEnd : vacEnd;
@@ -199,7 +183,7 @@ export class VacationService {
     return vacationsByDate;
   }
 
-  /** Ensure no overlapping vacations for the same employee */
+  /** Garante que não há sobreposição de férias para o mesmo funcionário */
   private async checkOverlap(
     employeeId: string,
     startDate: string,
@@ -214,8 +198,9 @@ export class VacationService {
     for (const doc of snapshot.docs) {
       if (doc.id === excludeId) continue;
       const vac = doc.data() as Vacation;
-      if (vac.employeeId !== employeeId || vac.year !== year) continue;
-
+      if (vac.employeeId !== employeeId || vac.year !== year) {
+        continue;
+      }
       const existStart = new Date(vac.startDate);
       const existEnd = new Date(vac.endDate);
       if (newStart <= existEnd && newEnd >= existStart) {

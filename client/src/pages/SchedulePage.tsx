@@ -1,4 +1,5 @@
 // src/pages/SchedulePage.tsx
+
 import { useState, useMemo } from "react";
 import {
   ChevronLeft,
@@ -118,7 +119,6 @@ export default function SchedulePage() {
   /* ================= Próximas Férias dos Funcionários ================= */
   const nextVacations = useMemo(() => {
     const today = new Date();
-    // ordenar por data de início mais próxima
     return vacations
       .map((v) => ({
         ...v,
@@ -383,9 +383,7 @@ export default function SchedulePage() {
               className="bg-brand hover:bg-brand-dark text-white"
             >
               <Calendar className="mr-2" size={16} />
-              {generateSchedule.isPending
-                ? "Atualizando..."
-                : "Atualizar Escala"}
+              {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
             </Button>
           )}
         </div>
@@ -497,10 +495,10 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {/* ===== Month View ===== */}
+      {/* Month View */}
       {viewMode === "month" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          {/* Cabeçalho das Semanas */}
+          {/* Weekday Header */}
           <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
             {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
               <div
@@ -511,7 +509,7 @@ export default function SchedulePage() {
               </div>
             ))}
           </div>
-          {/* Dias do Mês */}
+          {/* Days */}
           <div className="grid grid-cols-7 divide-x divide-gray-200">
             {calendarDays.map((day, idx) => {
               const baseClass =
@@ -555,11 +553,13 @@ export default function SchedulePage() {
                       <Calendar className="text-brand" size={12} />
                     )}
                   </div>
+
                   {day.holiday && (
                     <div className="text-[10px] text-brand font-medium mb-1 line-clamp-2">
                       {day.holiday.name}
                     </div>
                   )}
+
                   <div className="space-y-1">
                     {day.assignments.slice(0, 2).map((a, i) => (
                       <div
@@ -585,7 +585,7 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* ===== Week View ===== */}
+      {/* Week View */}
       {viewMode === "week" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
@@ -637,7 +637,7 @@ export default function SchedulePage() {
                       {day.day}
                     </div>
                     {day.holiday && (
-                      <div className="text-[10px] text-brand font-medium mt-1">
+                      <div className="text-[10px] text-brand font-medium mt-1 line-clamp-2">
                         {day.holiday.name}
                       </div>
                     )}
@@ -669,7 +669,7 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* ===== Day View ===== */}
+      {/* Day View */}
       {viewMode === "day" && dayData && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
