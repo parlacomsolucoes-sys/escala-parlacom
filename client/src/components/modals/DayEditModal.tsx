@@ -1,5 +1,7 @@
+// src/components/modals/DayEditModal.tsx
+
 import { useState, useEffect } from "react";
-import { X, Plus, Edit, Trash2, User } from "lucide-react";
+import { X, Plus, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,25 +45,27 @@ export default function DayEditModal({
     startTime: "",
     endTime: "",
   });
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     setCurrentAssignments(assignments);
+    setDirty(false);
   }, [assignments]);
 
   if (!isOpen) return null;
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString + "T00:00:00");
-    return date.toLocaleDateString("pt-BR", {
+    const d = new Date(dateString + "T00:00:00");
+    return d.toLocaleDateString("pt-BR", {
       year: "numeric",
       month: "long",
       day: "numeric",
     });
   };
 
-  const handleAddAssignment = async (e: React.FormEvent) => {
+  // only update local state
+  const handleAddLocal = (e: React.FormEvent) => {
     e.preventDefault();
-
     if (
       !newAssignment.employeeId ||
       !newAssignment.startTime ||
@@ -74,73 +78,52 @@ export default function DayEditModal({
       });
       return;
     }
-
-    const employee = employees.find(
-      (emp) => emp.id === newAssignment.employeeId
-    );
-    if (!employee) {
+    const emp = employees.find((x) => x.id === newAssignment.employeeId);
+    if (!emp) {
       toast({ title: "Funcionário não encontrado", variant: "destructive" });
       return;
     }
-
-    const assignment: Assignment = {
-      id: `${employee.id}-${date}`,
-      employeeId: newAssignment.employeeId,
-      employeeName: employee.name,
+    const asg: Assignment = {
+      id: `${emp.id}-${date}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
       startTime: normalizeTime(newAssignment.startTime),
       endTime: normalizeTime(newAssignment.endTime),
     };
-
-    const updatedAssignments = [
-      ...currentAssignments.filter(
-        (a) => a.employeeId !== assignment.employeeId
-      ),
-      assignment,
-    ];
-    setCurrentAssignments(updatedAssignments);
-
-    try {
-      await updateDaySchedule.mutateAsync({
-        date,
-        assignments: updatedAssignments,
-      });
-      toast({
-        title: "Escala atualizada",
-        description: "Escala foi atualizada com sucesso",
-      });
-      setNewAssignment({ employeeId: "", startTime: "", endTime: "" });
-    } catch (error) {
-      toast({
-        title: "Erro ao salvar",
-        description: "Não foi possível atualizar a escala",
-        variant: "destructive",
-      });
-      setCurrentAssignments(assignments);
-    }
+    setCurrentAssignments((prev) => [
+      ...prev.filter((a) => a.employeeId !== asg.employeeId),
+      asg,
+    ]);
+    setNewAssignment({ employeeId: "", startTime: "", endTime: "" });
+    setDirty(true);
   };
 
-  const handleRemoveAssignment = async (employeeId: string) => {
-    const updatedAssignments = currentAssignments.filter(
-      (a) => a.employeeId !== employeeId
+  // only update local state
+  const handleRemoveLocal = (employeeId: string) => {
+    setCurrentAssignments((prev) =>
+      prev.filter((a) => a.employeeId !== employeeId)
     );
-    setCurrentAssignments(updatedAssignments);
+    setDirty(true);
+  };
 
+  const handleSave = async () => {
     try {
       await updateDaySchedule.mutateAsync({
         date,
-        assignments: updatedAssignments,
+        assignments: currentAssignments,
       });
       toast({
         title: "Escala atualizada",
-        description: "Escala foi atualizada com sucesso",
+        description: "Todas as alterações foram salvas",
       });
-    } catch (error) {
+      setDirty(false);
+      onClose();
+    } catch {
       toast({
         title: "Erro ao salvar",
         description: "Não foi possível atualizar a escala",
         variant: "destructive",
       });
-      setCurrentAssignments(assignments);
     }
   };
 
@@ -157,20 +140,15 @@ export default function DayEditModal({
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-gray-900">
-              Editar Escala -{" "}
+              Editar Escala –{" "}
               <span className="text-brand">{formatDate(date)}</span>
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
+            <Button variant="ghost" size="sm" onClick={onClose}>
               <X size={20} />
             </Button>
           </div>
 
-          {/* Escalas Atuais */}
+          {/* Current Assignments */}
           <div className="mb-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">
               Escalas Atuais
@@ -181,9 +159,9 @@ export default function DayEditModal({
                   Nenhuma escala para este dia
                 </p>
               ) : (
-                currentAssignments.map((assignment) => (
+                currentAssignments.map((a) => (
                   <div
-                    key={assignment.employeeId}
+                    key={a.employeeId}
                     className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
                   >
                     <div className="flex items-center space-x-3">
@@ -192,10 +170,10 @@ export default function DayEditModal({
                       </div>
                       <div>
                         <p className="font-medium text-gray-900">
-                          {assignment.employeeName}
+                          {a.employeeName}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {assignment.startTime} - {assignment.endTime}
+                          {a.startTime} – {a.endTime}
                         </p>
                       </div>
                     </div>
@@ -203,9 +181,7 @@ export default function DayEditModal({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() =>
-                          handleRemoveAssignment(assignment.employeeId)
-                        }
+                        onClick={() => handleRemoveLocal(a.employeeId)}
                         className="text-red-600 hover:text-red-700"
                       >
                         <Trash2 size={16} />
@@ -217,7 +193,7 @@ export default function DayEditModal({
             </div>
           </div>
 
-          {/* Férias */}
+          {/* Vacation Notices */}
           {onVacationEmployeeIds.length > 0 && (
             <div className="mb-6">
               <h4 className="text-lg font-semibold text-gray-900 mb-4">
@@ -226,16 +202,16 @@ export default function DayEditModal({
               <div className="space-y-2">
                 {employees
                   .filter((emp) => onVacationEmployeeIds.includes(emp.id))
-                  .map((employee) => (
+                  .map((emp) => (
                     <div
-                      key={employee.id}
+                      key={emp.id}
                       className="flex items-center p-3 bg-yellow-50 border border-yellow-200 rounded-lg"
                     >
                       <div className="h-6 w-6 rounded-full bg-yellow-100 flex items-center justify-center mr-3">
                         <User className="text-yellow-600" size={14} />
                       </div>
                       <span className="text-sm font-medium text-yellow-800">
-                        {employee.name}
+                        {emp.name}
                       </span>
                       <span className="text-xs text-yellow-600 ml-2">
                         (em férias)
@@ -246,92 +222,114 @@ export default function DayEditModal({
             </div>
           )}
 
-          {/* Adicionar Escala */}
+          {/* Add Assignment */}
           {user && (
-            <div className="border-t pt-6">
+            <form onSubmit={handleAddLocal} className="border-t pt-6 space-y-4">
               <h4 className="text-lg font-semibold text-gray-900 mb-4">
-                Adicionar Escala
+                Adicionar ou Atualizar Horário
               </h4>
-              <form onSubmit={handleAddAssignment} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <Label className="block text-sm font-medium text-gray-700 mb-2">
-                      Funcionário
-                    </Label>
-                    <Select
-                      value={newAssignment.employeeId}
-                      onValueChange={(value) =>
-                        setNewAssignment((prev) => ({
-                          ...prev,
-                          employeeId: value,
-                        }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {employees
-                          .filter(
-                            (emp) =>
-                              emp.isActive &&
-                              !onVacationEmployeeIds.includes(emp.id)
-                          )
-                          .map((employee) => (
-                            <SelectItem key={employee.id} value={employee.id}>
-                              {employee.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="block text-sm font-medium text-gray-700 mb-2">
-                      Início
-                    </Label>
-                    <Input
-                      type="time"
-                      value={newAssignment.startTime}
-                      onChange={(e) =>
-                        setNewAssignment((prev) => ({
-                          ...prev,
-                          startTime: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label className="block text-sm font-medium text-gray-700 mb-2">
-                      Fim
-                    </Label>
-                    <Input
-                      type="time"
-                      value={newAssignment.endTime}
-                      onChange={(e) =>
-                        setNewAssignment((prev) => ({
-                          ...prev,
-                          endTime: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end space-x-3 pt-4">
-                  <Button type="button" variant="ghost" onClick={onClose}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={updateDaySchedule.isPending}
-                    className="bg-brand hover:bg-brand-dark text-white"
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Funcionário
+                  </Label>
+                  <Select
+                    value={newAssignment.employeeId}
+                    onValueChange={(val) =>
+                      setNewAssignment((p) => ({ ...p, employeeId: val }))
+                    }
                   >
-                    <Plus className="mr-2" size={16} />
-                    {updateDaySchedule.isPending ? "Salvando..." : "Adicionar"}
-                  </Button>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employees
+                        .filter(
+                          (emp) =>
+                            emp.isActive &&
+                            !onVacationEmployeeIds.includes(emp.id)
+                        )
+                        .map((emp) => (
+                          <SelectItem key={emp.id} value={emp.id}>
+                            {emp.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </form>
-            </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Início
+                  </Label>
+                  <Input
+                    type="time"
+                    value={newAssignment.startTime}
+                    onChange={(e) =>
+                      setNewAssignment((p) => ({
+                        ...p,
+                        startTime: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Fim
+                  </Label>
+                  <Input
+                    type="time"
+                    value={newAssignment.endTime}
+                    onChange={(e) =>
+                      setNewAssignment((p) => ({
+                        ...p,
+                        endTime: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setNewAssignment({
+                      employeeId: "",
+                      startTime: "",
+                      endTime: "",
+                    });
+                  }}
+                >
+                  Limpar Campos
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-brand hover:bg-brand-dark text-white"
+                >
+                  <Plus className="mr-2" size={16} />
+                  Adicionar / Atualizar
+                </Button>
+              </div>
+            </form>
           )}
+
+          {/* Save / Cancel */}
+          <div className="border-t pt-6 flex justify-end space-x-3">
+            <Button variant="ghost" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={!dirty || updateDaySchedule.isPending}
+              className="bg-brand hover:bg-brand-dark text-white"
+            >
+              {updateDaySchedule.isPending
+                ? "Salvando..."
+                : "Salvar Alterações"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
