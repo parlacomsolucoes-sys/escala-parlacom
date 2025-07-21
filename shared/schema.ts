@@ -1,5 +1,4 @@
 // src/shared/schema.ts
-
 import { z } from "zod";
 
 /* =========================================================
@@ -18,23 +17,17 @@ export const insertEmployeeSchema = z.object({
       "saturday",
     ])
   ),
-  defaultStartTime: z
-    .string()
-    .regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Formato de hora inválido"),
-  defaultEndTime: z
-    .string()
-    .regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Formato de hora inválido"),
+  defaultStartTime: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/),
+  defaultEndTime: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/),
   isActive: z.boolean().default(true),
   weekendRotation: z.boolean().default(false),
   customSchedule: z
     .record(
       z.string(),
-      z.object({
-        startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-      })
+      z.object({ startTime: z.string(), endTime: z.string() })
     )
     .optional(),
+  observations: z.string().optional(),
 });
 
 export const updateEmployeeSchema = insertEmployeeSchema.partial().extend({
@@ -55,7 +48,7 @@ export interface Employee extends InsertEmployee {
  * =======================================================*/
 const baseHolidaySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  date: z.string().optional(), // legacy "MM-DD" or "YYYY-MM-DD"
+  date: z.string().optional(), // MM‑DD ou YYYY‑MM‑DD
   month: z.number().min(1).max(12).optional(),
   day: z.number().min(1).max(31).optional(),
   description: z.string().optional(),
@@ -63,28 +56,28 @@ const baseHolidaySchema = z.object({
 
 export const insertHolidaySchema = baseHolidaySchema.transform((data) => {
   if (data.date && !data.month && !data.day) {
-    const m =
-      data.date.length === 10 && data.date.includes("-")
+    const mm =
+      data.date.length === 10
         ? data.date.substring(5, 7)
         : data.date.split("-")[0];
-    const d =
-      data.date.length === 10 && data.date.includes("-")
+    const dd =
+      data.date.length === 10
         ? data.date.substring(8, 10)
         : data.date.split("-")[1];
-    data.month = parseInt(m, 10);
-    data.day = parseInt(d, 10);
-    data.date = `${m}-${d}`;
-  } else if (data.month && data.day) {
-    const mm = String(data.month).padStart(2, "0");
-    const dd = String(data.day).padStart(2, "0");
+    data.month = Number(mm);
+    data.day = Number(dd);
     data.date = `${mm}-${dd}`;
+  } else if (data.month && data.day) {
+    data.date = `${String(data.month).padStart(2, "0")}-${String(
+      data.day
+    ).padStart(2, "0")}`;
   }
   return data;
 });
 
-export const updateHolidaySchema = baseHolidaySchema
-  .partial()
-  .extend({ id: z.string() });
+export const updateHolidaySchema = baseHolidaySchema.partial().extend({
+  id: z.string(),
+});
 
 export type InsertHoliday = z.infer<typeof insertHolidaySchema>;
 export type UpdateHoliday = z.infer<typeof updateHolidaySchema>;
@@ -102,12 +95,8 @@ export const assignmentSchema = z.object({
   id: z.string(),
   employeeId: z.string(),
   employeeName: z.string(),
-  startTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido"),
-  endTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido"),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
 });
 export type Assignment = z.infer<typeof assignmentSchema>;
 
@@ -115,12 +104,10 @@ export const insertAssignmentSchema = assignmentSchema.omit({ id: true });
 export type InsertAssignment = z.infer<typeof insertAssignmentSchema>;
 
 /* =========================================================
- * DAILY (ScheduleDay)
+ * DAILY
  * =======================================================*/
 export const scheduleDaySchema = z.object({
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato YYYY-MM-DD"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   assignments: z.array(assignmentSchema),
   isWeekend: z.boolean(),
   isHoliday: z.union([
@@ -132,7 +119,7 @@ export const scheduleDaySchema = z.object({
 export type ScheduleDay = z.infer<typeof scheduleDaySchema>;
 
 /* =========================================================
- * MONTHLY (Documento consolidado)
+ * MONTHLY
  * =======================================================*/
 export const monthlyScheduleSchema = z.object({
   year: z.number(),
@@ -140,7 +127,7 @@ export const monthlyScheduleSchema = z.object({
   days: z.array(scheduleDaySchema),
   rotationState: z
     .object({
-      lastSwap: z.boolean(),
+      lastSaturdayEmployeeId: z.string().nullable(),
     })
     .optional(),
   generatedAt: z.string(),
@@ -152,8 +139,6 @@ export type MonthlySchedule = z.infer<typeof monthlyScheduleSchema>;
 /* =========================================================
  * REQUESTS
  * =======================================================*/
-
-// Body for POST /api/schedule/generate
 export const generateMonthlyScheduleSchema = z.object({
   year: z.number().min(2020).max(2030),
   month: z.number().min(1).max(12),
@@ -163,7 +148,7 @@ export type GenerateMonthlyScheduleRequest = z.infer<
 >;
 
 /* =========================================================
- * COMPAT: ScheduleEntry for legacy front
+ * COMPAT
  * =======================================================*/
 export type ScheduleEntry = ScheduleDay;
 
@@ -175,16 +160,13 @@ export const vacationSchema = z.object({
   employeeId: z.string(),
   employeeName: z.string(),
   year: z.number(),
-  startDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD esperado"),
-  endDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD esperado"),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   createdAt: z.string(),
   updatedAt: z.string(),
   notes: z.string().optional(),
 });
+
 export const insertVacationSchema = vacationSchema.omit({
   id: true,
   employeeName: true,
@@ -193,16 +175,16 @@ export const insertVacationSchema = vacationSchema.omit({
   updatedAt: true,
 });
 export const updateVacationSchema = insertVacationSchema.partial();
+
 export type Vacation = z.infer<typeof vacationSchema>;
 export type InsertVacation = z.infer<typeof insertVacationSchema>;
 
 /* =========================================================
- * UTILITÁRIOS
+ * UTIL
  * =======================================================*/
 export function normalizeTime(time: string): string {
   const m = time.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return time;
-  return `${m[1].padStart(2, "0")}:${m[2]}`;
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : time;
 }
 
 export function isWeekend(date: Date): boolean {
@@ -214,13 +196,13 @@ export function isHoliday(
   date: Date,
   holidays: Holiday[]
 ): Holiday | undefined {
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
   return holidays.find((h) => {
-    if (h.month && h.day) return h.month === m && h.day === d;
+    if (h.month && h.day) return h.month === month && h.day === day;
     if (h.date?.length === 5) {
       const [mm, dd] = h.date.split("-").map(Number);
-      return mm === m && dd === d;
+      return mm === month && dd === day;
     }
     if (h.date?.length === 10) {
       return h.date === date.toISOString().split("T")[0];
