@@ -1,3 +1,4 @@
+// client/src/pages/EmployeesPage.tsx
 import { useState } from "react";
 import { Plus, Edit, Trash2, User, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,7 @@ export default function EmployeesPage() {
   const deleteEmployee = useDeleteEmployee();
 
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState<
-    Employee | undefined
-  >();
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee>();
 
   const handleCreateEmployee = () => {
     setSelectedEmployee(undefined);
@@ -30,15 +29,16 @@ export default function EmployeesPage() {
   };
 
   const handleDeleteEmployee = async (employee: Employee) => {
-    if (!confirm(`Tem certeza que deseja excluir ${employee.name}?`)) return;
-
+    if (!confirm(`Tem certeza que deseja excluir ${employee.name}?`)) {
+      return;
+    }
     try {
       await deleteEmployee.mutateAsync(employee.id);
       toast({
         title: "Funcionário excluído",
         description: "Funcionário foi excluído com sucesso",
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Erro ao excluir",
         description: "Não foi possível excluir o funcionário",
@@ -57,8 +57,7 @@ export default function EmployeesPage() {
       friday: "Sex",
       saturday: "Sáb",
     };
-
-    return workDays.map((day) => dayMap[day] || day);
+    return workDays.map((d) => dayMap[d] || d);
   };
 
   const getEmployeeColor = (index: number) => {
@@ -99,16 +98,14 @@ export default function EmployeesPage() {
   return (
     <>
       <div className="space-y-6">
-        {/* Page Header */}
+        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Funcionários</h2>
             <p className="text-gray-600 mt-1">
-              Gerencie funcionários, suas informações e horários de trabalho
+              Gerencie funcionários e seus horários de trabalho
             </p>
           </div>
-
-          {/* Add Employee Button (Admin Only) */}
           {user && (
             <Button
               onClick={handleCreateEmployee}
@@ -120,7 +117,7 @@ export default function EmployeesPage() {
           )}
         </div>
 
-        {/* Employees Table */}
+        {/* Tabela */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -173,13 +170,13 @@ export default function EmployeesPage() {
                     </td>
                   </tr>
                 ) : (
-                  employees.map((employee, index) => (
+                  employees.map((employee, i) => (
                     <tr key={employee.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div
                             className={`h-10 w-10 rounded-full flex items-center justify-center ${getEmployeeColor(
-                              index
+                              i
                             )}`}
                           >
                             <User size={20} />
@@ -196,13 +193,13 @@ export default function EmployeesPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-wrap gap-1">
-                          {getWorkDaysDisplay(employee.workDays).map((day) => (
+                          {getWorkDaysDisplay(employee.workDays).map((d) => (
                             <Badge
-                              key={day}
+                              key={d}
                               variant="secondary"
                               className="text-xs"
                             >
-                              {day}
+                              {d}
                             </Badge>
                           ))}
                           {employee.weekendRotation && (
@@ -214,15 +211,14 @@ export default function EmployeesPage() {
                               Revezamento
                             </Badge>
                           )}
-                          {employee.customSchedule &&
-                            Object.keys(employee.customSchedule).length > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="text-xs border-blue-300 text-blue-700 bg-blue-50"
-                              >
-                                Horários Personalizados
-                              </Badge>
-                            )}
+                          {Object.keys(employee.customSchedule).length > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-xs border-blue-300 text-blue-700 bg-blue-50"
+                            >
+                              Horários Personalizados
+                            </Badge>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -245,7 +241,7 @@ export default function EmployeesPage() {
                           {employee.isActive ? "Ativo" : "Inativo"}
                         </Badge>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-6 py-4 text-sm text-gray-700">
                         {employee.notes || "—"}
                       </td>
                       {user && (
@@ -280,7 +276,6 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      {/* Employee Modal */}
       {showEmployeeModal && (
         <EmployeeModal
           isOpen={showEmployeeModal}

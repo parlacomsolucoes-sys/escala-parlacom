@@ -1,8 +1,10 @@
+// client/src/components/modals/EmployeeModal.tsx
 import { useState, useEffect } from "react";
 import { X, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -14,9 +16,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateEmployee, useUpdateEmployee } from "@/hooks/useSchedule";
 import type { Employee, InsertEmployee } from "@shared/schema";
-
-// If you have a Textarea component:
-import { Textarea } from "@/components/ui/textarea";
 
 interface EmployeeModalProps {
   isOpen: boolean;
@@ -43,18 +42,16 @@ export default function EmployeeModal({
   const createEmployee = useCreateEmployee();
   const updateEmployee = useUpdateEmployee();
 
-  const [formData, setFormData] = useState<InsertEmployee & { notes?: string }>(
-    {
-      name: "",
-      workDays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
-      defaultStartTime: "08:00",
-      defaultEndTime: "18:00",
-      isActive: true,
-      weekendRotation: false,
-      customSchedule: {},
-      notes: "", // ← new field
-    }
-  );
+  const [formData, setFormData] = useState<InsertEmployee>({
+    name: "",
+    workDays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    defaultStartTime: "08:00",
+    defaultEndTime: "18:00",
+    isActive: true,
+    weekendRotation: false,
+    customSchedule: {},
+    notes: "",
+  });
 
   useEffect(() => {
     if (employee) {
@@ -66,18 +63,7 @@ export default function EmployeeModal({
         isActive: employee.isActive,
         weekendRotation: employee.weekendRotation,
         customSchedule: employee.customSchedule,
-        notes: employee.notes || "", // ← load existing
-      });
-    } else {
-      setFormData({
-        name: "",
-        workDays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
-        defaultStartTime: "08:00",
-        defaultEndTime: "18:00",
-        isActive: true,
-        weekendRotation: false,
-        customSchedule: {},
-        notes: "", // ← blank by default
+        notes: employee.notes || "",
       });
     }
   }, [employee, isOpen]);
@@ -86,7 +72,6 @@ export default function EmployeeModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     try {
       if (employee) {
         await updateEmployee.mutateAsync({ id: employee.id, ...formData });
@@ -102,7 +87,7 @@ export default function EmployeeModal({
         });
       }
       onClose();
-    } catch (error) {
+    } catch {
       toast({
         title: "Erro ao salvar",
         description: "Não foi possível salvar o funcionário",
@@ -119,10 +104,10 @@ export default function EmployeeModal({
       const newWorkDays = checked
         ? [...prev.workDays, day]
         : prev.workDays.filter((d) => d !== day);
-
       const newCustom = { ...prev.customSchedule };
-      if (!checked && newCustom[day]) delete newCustom[day];
-
+      if (!checked && newCustom[day]) {
+        delete newCustom[day];
+      }
       return {
         ...prev,
         workDays: newWorkDays,
@@ -141,7 +126,7 @@ export default function EmployeeModal({
       customSchedule: {
         ...prev.customSchedule,
         [day]: {
-          ...(prev.customSchedule?.[day] || {}),
+          ...prev.customSchedule?.[day],
           [field]: value,
         },
       },
@@ -149,7 +134,9 @@ export default function EmployeeModal({
   };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
   };
 
   const isLoading = createEmployee.isPending || updateEmployee.isPending;
@@ -176,7 +163,7 @@ export default function EmployeeModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Basic Info + Notes */}
+            {/* Nome e Status */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <Label className="block text-sm font-medium text-gray-700 mb-2">
@@ -214,22 +201,24 @@ export default function EmployeeModal({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="md:col-span-2">
-                <Label className="block text-sm font-medium text-gray-700 mb-2">
-                  Observações
-                </Label>
-                <Textarea
-                  placeholder="Qualquer observação sobre o funcionário"
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, notes: e.target.value }))
-                  }
-                  rows={3}
-                />
-              </div>
             </div>
 
-            {/* Work Days */}
+            {/* Observações */}
+            <div>
+              <Label className="block text-sm font-medium text-gray-700 mb-2">
+                Observações
+              </Label>
+              <Textarea
+                placeholder="Detalhes adicionais sobre este funcionário…"
+                value={formData.notes}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, notes: e.target.value }))
+                }
+                rows={3}
+              />
+            </div>
+
+            {/* Dias de Trabalho */}
             <div>
               <Label className="block text-sm font-medium text-gray-700 mb-3">
                 Dias de Trabalho
@@ -254,7 +243,7 @@ export default function EmployeeModal({
               </div>
             </div>
 
-            {/* Default Hours */}
+            {/* Horário Padrão */}
             <div>
               <Label className="block text-sm font-medium text-gray-700 mb-3">
                 Horário Padrão
@@ -295,28 +284,26 @@ export default function EmployeeModal({
               </div>
             </div>
 
-            {/* Custom Schedule */}
+            {/* Horários Personalizados */}
             {formData.workDays.length > 0 && (
               <div>
                 <Label className="block text-sm font-medium text-gray-700 mb-3">
                   Horários Personalizados por Dia
                 </Label>
                 <p className="text-xs text-gray-600 mb-4">
-                  Defina horários específicos para cada dia. Se não preenchido,
-                  será usado o horário padrão.
+                  Se não definido, será usado o horário padrão.
                 </p>
                 <div className="space-y-3">
                   {formData.workDays.map((day) => {
-                    const dayInfo = WEEKDAYS.find((w) => w.value === day);
-                    const customTime = formData.customSchedule?.[day];
-
+                    const info = WEEKDAYS.find((w) => w.value === day);
+                    const custom = formData.customSchedule?.[day];
                     return (
                       <div
                         key={day}
                         className="flex items-center space-x-4 p-3 border border-gray-200 rounded-lg"
                       >
                         <div className="w-12 text-sm font-medium text-gray-700">
-                          {dayInfo?.label}
+                          {info?.label}
                         </div>
                         <div className="flex-1 grid grid-cols-2 gap-3">
                           <div>
@@ -326,7 +313,7 @@ export default function EmployeeModal({
                             <Input
                               type="time"
                               placeholder={formData.defaultStartTime}
-                              value={customTime?.startTime || ""}
+                              value={custom?.startTime || ""}
                               onChange={(e) =>
                                 handleCustomScheduleChange(
                                   day,
@@ -344,7 +331,7 @@ export default function EmployeeModal({
                             <Input
                               type="time"
                               placeholder={formData.defaultEndTime}
-                              value={customTime?.endTime || ""}
+                              value={custom?.endTime || ""}
                               onChange={(e) =>
                                 handleCustomScheduleChange(
                                   day,
@@ -356,26 +343,23 @@ export default function EmployeeModal({
                             />
                           </div>
                         </div>
-                        {customTime?.startTime || customTime?.endTime ? (
+                        {(custom?.startTime || custom?.endTime) && (
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             onClick={() => {
                               setFormData((prev) => {
-                                const newCustom = { ...prev.customSchedule };
-                                delete newCustom[day];
-                                return {
-                                  ...prev,
-                                  customSchedule: newCustom,
-                                };
+                                const cs = { ...prev.customSchedule };
+                                delete cs[day];
+                                return { ...prev, customSchedule: cs };
                               });
                             }}
                             className="text-red-500 hover:text-red-700"
                           >
                             <X size={16} />
                           </Button>
-                        ) : null}
+                        )}
                       </div>
                     );
                   })}
@@ -383,7 +367,7 @@ export default function EmployeeModal({
               </div>
             )}
 
-            {/* Weekend Rotation */}
+            {/* Revezamento de Fim de Semana */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <label className="flex items-center space-x-3">
                 <Checkbox
@@ -400,13 +384,13 @@ export default function EmployeeModal({
                     Participar do revezamento de fim de semana
                   </span>
                   <p className="text-xs text-gray-600 mt-1">
-                    Funcionário alternará entre sábado e domingo em semanas
-                    pares/ímpares
+                    Alterna entre sábado e domingo em semanas pares/ímpares
                   </p>
                 </div>
               </label>
             </div>
 
+            {/* Botões */}
             <div className="flex justify-end space-x-3 pt-6 border-t">
               <Button
                 type="button"
