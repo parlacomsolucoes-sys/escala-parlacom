@@ -227,17 +227,27 @@ export class ScheduleService {
       .filter((e) => e.isActive && e.weekendRotation)
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Recupera último estado de swap do mês anterior
-    const prevMonth = month === 1 ? 12 : month - 1;
-    const prevYear = month === 1 ? year - 1 : year;
-    const prevSnap = await this.schedulesCollection
-      .doc(getMonthlyScheduleId(prevYear, prevMonth))
-      .get()
-      .catch(() => null);
-    const prevMonthly = prevSnap?.exists
-      ? (prevSnap.data() as MonthlySchedule)
-      : null;
-    let swap = prevMonthly?.rotationState?.lastSwap ?? false;
+    // Determine initial swap by looking at the actual last Saturday of the previous month
+    let swap = false;
+    if (weekendEmps.length >= 2) {
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const prevSnap = await this.schedulesCollection
+        .doc(getMonthlyScheduleId(prevYear, prevMonth))
+        .get()
+        .catch(() => null);
+      if (prevSnap?.exists) {
+        const prevMonthly = prevSnap.data() as MonthlySchedule;
+        // find last saturday in previous month
+        const lastSatDay = [...prevMonthly.days]
+          .filter((d) => new Date(d.date).getDay() === 6)
+          .pop();
+        if (lastSatDay && lastSatDay.assignments.length > 0) {
+          // if last Saturday was weekendEmps[0], set swap=false so this month's first Saturday goes to index 1
+          swap = lastSatDay.assignments[0].employeeId !== weekendEmps[0].id;
+        }
+      }
+    }
 
     for (const day of days) {
       const idx = new Date(day.date).getDay(); // 0=domingo,6=sábado
@@ -246,7 +256,8 @@ export class ScheduleService {
       // finais de semana
       if (day.isWeekend && weekendEmps.length >= 2) {
         const [A, B] = weekendEmps;
-        // se for sábado (6) e swap=false, pega A; se swap=true, pega B. Domingo inverte a condição.
+        // Saturday picks (idx===6) === swap ? A : B
+        // Sunday similarly, then after Sunday flip
         const emp = (idx === 6) === swap ? A : B;
         if (!onVac.includes(emp.id)) {
           const times = pickEmployeeDefaultTimes(emp, idx);
@@ -258,7 +269,7 @@ export class ScheduleService {
             endTime: normalizeTime(times.endTime),
           });
         }
-        // após domingo (0), inverte para próxima semana
+        // após domingo (0), inverte para a próxima semana
         if (idx === 0) {
           swap = !swap;
         }
