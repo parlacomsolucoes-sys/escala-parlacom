@@ -27,7 +27,15 @@ const scheduleCache = new Map<
 >();
 const CACHE_TTL_MS = 60_000;
 
-const WEEKDAY_KEYS = [
+const WEEKDAY_KEYS: Array<
+  | "sunday"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+> = [
   "sunday",
   "monday",
   "tuesday",
@@ -35,20 +43,21 @@ const WEEKDAY_KEYS = [
   "thursday",
   "friday",
   "saturday",
-] as const;
+];
 
 export class ScheduleService {
   private employeesCollection = adminDb.collection("employees");
   private holidaysCollection = adminDb.collection("holidays");
   private schedulesCollection = adminDb.collection("schedules");
 
-  /** Limpa todo cache para forçar rebuild de escalas */
+  /** Clear *all* cached months so next fetch regenerates from scratch */
   clearCache() {
     scheduleCache.clear();
   }
 
   /* ================= EMPLOYEES ================= */
 
+  /** Fetch all employees */
   async getAllEmployees(): Promise<Employee[]> {
     const snapshot = await this.employeesCollection.get();
     return snapshot.docs.map((doc) => ({
@@ -57,37 +66,67 @@ export class ScheduleService {
     })) as Employee[];
   }
 
+  /**
+   * Create a brand‑new employee, including optional notes,
+   * and clear the schedule cache so the calendar picks up the new person.
+   */
   async createEmployee(
-    employee: Omit<Employee, "id" | "createdAt" | "updatedAt">
+    employee: Omit<Employee, "id" | "createdAt" | "updatedAt"> & {
+      notes?: string;
+    }
   ): Promise<Employee> {
     const docRef = this.employeesCollection.doc();
     const now = new Date().toISOString();
+
     const newEmployee: Employee = {
       id: docRef.id,
-      ...employee,
+      name: employee.name,
+      workDays: employee.workDays,
+      defaultStartTime: employee.defaultStartTime,
+      defaultEndTime: employee.defaultEndTime,
+      isActive: employee.isActive,
+      weekendRotation: employee.weekendRotation,
+      customSchedule: employee.customSchedule,
+      notes: employee.notes ?? "", // ← store notes
       createdAt: now,
       updatedAt: now,
     };
+
     await docRef.set(newEmployee);
     this.clearCache();
     return newEmployee;
   }
 
+  /**
+   * Update an existing employee — now including notes —
+   * and clear the cache so the calendar and employee list refresh.
+   */
   async updateEmployee(
     id: string,
-    employee: Partial<Omit<Employee, "id" | "createdAt">>
+    employee: Partial<Omit<Employee, "id" | "createdAt"> & { notes?: string }>
   ): Promise<Employee> {
     const docRef = this.employeesCollection.doc(id);
-    const updateData = {
+    const now = new Date().toISOString();
+
+    // Build the update payload
+    const updateData: Partial<Omit<Employee, "id">> = {
       ...employee,
-      updatedAt: new Date().toISOString(),
+      ...(employee.notes !== undefined ? { notes: employee.notes } : {}),
+      updatedAt: now,
     };
+
     await docRef.update(updateData);
-    const doc = await docRef.get();
+
+    const updatedSnap = await docRef.get();
+    const updatedEmployee = updatedSnap.data() as Employee;
+
     this.clearCache();
-    return { id: doc.id, ...(doc.data() as Omit<Employee, "id">) } as Employee;
+    return { id: updatedEmployee.id, ...updatedEmployee };
   }
 
+  /**
+   * Delete an employee by ID and clear cache
+   */
   async deleteEmployee(id: string): Promise<void> {
     await this.employeesCollection.doc(id).delete();
     this.clearCache();
@@ -128,6 +167,7 @@ export class ScheduleService {
       createdAt: now,
       updatedAt: now,
     };
+
     await docRef.set(newHoliday);
     this.clearCache();
     return newHoliday;
@@ -141,8 +181,8 @@ export class ScheduleService {
   /* ================= SCHEDULE ================= */
 
   /**
-   * Busca ou gera a escala do mês.
-   * Se forceRegenerate for true, sempre gera nova e sobrescreve o Firestore.
+   * Fetch or generate the monthly schedule.
+   * If forceRegenerate is true, always rebuild and overwrite Firestore.
    */
   async getScheduleForMonth(
     year: number,
@@ -155,7 +195,7 @@ export class ScheduleService {
     if (!forceRegenerate) {
       const cached = scheduleCache.get(docId);
       if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-        if (etag === cached.etag) {
+        if (etag && etag === cached.etag) {
           throw new Error("NOT_MODIFIED");
         }
         return {
@@ -191,73 +231,64 @@ export class ScheduleService {
     };
   }
 
-  /**
-   * Gera uma nova escala mensal do zero, respeitando férias e alternância de finais de semana.
-   */
+  /** Construct a brand‑new schedule from scratch */
   private async createMonthlySchedule(
     year: number,
     month: number
   ): Promise<MonthlySchedule> {
     const holidays = await this.getAllHolidays();
     const holidayMap = calcHolidayMap(holidays);
+
     const vacationMap = await vacationService.getEmployeesOnVacationForMonth(
       year,
       month
     );
     const employees = await this.getAllEmployees();
-
     const monthDays = getMonthDays(year, month);
+
     const days: ScheduleDay[] = monthDays.map((date) => {
       const dateStr = formatDate(date);
-      const isWkd = isWeekend(date);
-      const isHol = isHolidayDate(date, holidayMap);
-      const onVacIds = Array.from(vacationMap.get(dateStr) || []);
-      return {
+      const weekend = isWeekend(date);
+      const holiday = isHolidayDate(date, holidayMap);
+      const onVacationEmployeeIds = Array.from(vacationMap.get(dateStr) || []);
+
+      const base: ScheduleDay = {
         date: dateStr,
         assignments: [],
-        isWeekend: isWkd,
-        isHoliday: isHol,
-        ...(onVacIds.length > 0 ? { onVacationEmployeeIds: onVacIds } : {}),
+        isWeekend: weekend,
+        isHoliday: holiday,
       };
+      if (onVacationEmployeeIds.length > 0) {
+        base.onVacationEmployeeIds = onVacationEmployeeIds;
+      }
+      return base;
     });
 
-    // --- LÓGICA DE REVEZAMENTO DOS FINAIS DE SEMANA ----
-
-    const weekendEmps = employees
+    // --- WEEKEND ROTATION ---
+    const weekendEmployees = employees
       .filter((e) => e.isActive && e.weekendRotation)
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Determine initial swap by looking at the actual last Saturday of the previous month
-    let swap = false;
-    if (weekendEmps.length >= 2) {
-      const prevMonth = month === 1 ? 12 : month - 1;
-      const prevYear = month === 1 ? year - 1 : year;
-      const prevSnap = await this.schedulesCollection
-        .doc(getMonthlyScheduleId(prevYear, prevMonth))
-        .get()
-        .catch(() => null);
-      if (prevSnap?.exists) {
-        const prevMonthly = prevSnap.data() as MonthlySchedule;
-        // find last saturday in previous month
-        const lastSatDay = [...prevMonthly.days]
-          .filter((d) => new Date(d.date).getDay() === 6)
-          .pop();
-        if (lastSatDay && lastSatDay.assignments.length > 0) {
-          // if last Saturday was weekendEmps[0], set swap=false so this month's first Saturday goes to index 1
-          swap = lastSatDay.assignments[0].employeeId !== weekendEmps[0].id;
-        }
-      }
-    }
+    // Pull lastSwap from previous month
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const prevSnap = await this.schedulesCollection
+      .doc(getMonthlyScheduleId(prevYear, prevMonth))
+      .get()
+      .catch(() => null);
+
+    const prevSchedule = prevSnap?.exists
+      ? (prevSnap.data() as MonthlySchedule)
+      : null;
+    let swap = prevSchedule?.rotationState?.lastSwap ?? false;
 
     for (const day of days) {
       const idx = new Date(day.date).getDay(); // 0=domingo,6=sábado
       const onVac = day.onVacationEmployeeIds || [];
 
-      // finais de semana
-      if (day.isWeekend && weekendEmps.length >= 2) {
-        const [A, B] = weekendEmps;
-        // Saturday picks (idx===6) === swap ? A : B
-        // Sunday similarly, then after Sunday flip
+      // Weekend
+      if (day.isWeekend && weekendEmployees.length >= 2) {
+        const [A, B] = weekendEmployees;
         const emp = (idx === 6) === swap ? A : B;
         if (!onVac.includes(emp.id)) {
           const times = pickEmployeeDefaultTimes(emp, idx);
@@ -269,34 +300,32 @@ export class ScheduleService {
             endTime: normalizeTime(times.endTime),
           });
         }
-        // após domingo (0), inverte para a próxima semana
         if (idx === 0) {
           swap = !swap;
         }
       }
-      // dias úteis
+      // Weekday
       else if (!day.isWeekend && !day.isHoliday) {
         const key = WEEKDAY_KEYS[new Date(day.date).getDay()];
-        employees
-          .filter(
-            (e) =>
-              e.isActive &&
-              e.workDays.includes(key) &&
-              !(day.onVacationEmployeeIds || []).includes(e.id)
-          )
-          .forEach((emp) => {
-            const times = pickEmployeeDefaultTimes(
-              emp,
-              new Date(day.date).getDay()
-            );
-            day.assignments.push({
-              id: `${emp.id}-${day.date}`,
-              employeeId: emp.id,
-              employeeName: emp.name,
-              startTime: normalizeTime(times.startTime),
-              endTime: normalizeTime(times.endTime),
-            });
+        const available = employees.filter(
+          (e) =>
+            e.isActive &&
+            e.workDays.includes(key) &&
+            !(day.onVacationEmployeeIds || []).includes(e.id)
+        );
+        for (const emp of available) {
+          const times = pickEmployeeDefaultTimes(
+            emp,
+            new Date(day.date).getDay()
+          );
+          day.assignments.push({
+            id: `${emp.id}-${day.date}`,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            startTime: normalizeTime(times.startTime),
+            endTime: normalizeTime(times.endTime),
           });
+        }
       }
     }
 
@@ -312,41 +341,39 @@ export class ScheduleService {
     };
   }
 
-  /**
-   * Atualiza manualmente as assignments de um dia
-   * e limpa cache daquele mês.
-   */
+  /** Manually update assignments of a single day */
   async updateDaySchedule(
     date: string,
     assignments: Assignment[]
   ): Promise<ScheduleDay> {
-    const [y, m] = date.split("-").map(Number);
-    const docId = getMonthlyScheduleId(y, m);
+    const [yearString, monthString] = date.split("-");
+    const year = parseInt(yearString, 10);
+    const month = parseInt(monthString, 10);
+    const docId = getMonthlyScheduleId(year, month);
+
     const docRef = this.schedulesCollection.doc(docId);
     const snap = await docRef.get();
     if (!snap.exists) {
-      throw new Error(`Schedule não encontrado para ${docId}`);
-    }
-    const monthly = snap.data() as MonthlySchedule;
-    const idx = monthly.days.findIndex((d) => d.date === date);
-    if (idx === -1) {
-      throw new Error(`Dia ${date} não encontrado na escala`);
+      throw new Error(`Schedule not found for ${docId}`);
     }
 
-    // valida se alguém está de férias
+    const monthlySchedule = snap.data() as MonthlySchedule;
+    const idx = monthlySchedule.days.findIndex((d) => d.date === date);
+    if (idx === -1) {
+      throw new Error(`Day ${date} not found in schedule`);
+    }
+
     for (const a of assignments) {
       if (await vacationService.isEmployeeOnVacation(a.employeeId, date)) {
         throw new Error("Funcionário em férias neste dia");
       }
     }
 
-    monthly.days[idx].assignments = assignments;
-    monthly.updatedAt = new Date().toISOString();
-    await docRef.set(monthly);
-
-    // limpa cache só deste mês
+    monthlySchedule.days[idx].assignments = assignments;
+    monthlySchedule.updatedAt = new Date().toISOString();
+    await docRef.set(monthlySchedule);
     scheduleCache.delete(docId);
-    return monthly.days[idx];
+    return monthlySchedule.days[idx];
   }
 }
 
