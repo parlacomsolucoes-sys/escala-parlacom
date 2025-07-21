@@ -383,7 +383,9 @@ export default function SchedulePage() {
               className="bg-brand hover:bg-brand-dark text-white"
             >
               <Calendar className="mr-2" size={16} />
-              {generateSchedule.isPending ? "Gerando..." : "Gerar Escala"}
+              {generateSchedule.isPending
+                ? "Atualizando..."
+                : "Atualizar Escala"}
             </Button>
           )}
         </div>
