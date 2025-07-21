@@ -7,19 +7,17 @@ import { z } from "zod";
  * =======================================================*/
 export const insertEmployeeSchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  workDays: z
-    .array(
-      z.enum([
-        "sunday",
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-      ])
-    )
-    .nonempty("Deve selecionar ao menos um dia de trabalho"),
+  workDays: z.array(
+    z.enum([
+      "sunday",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+    ])
+  ),
   defaultStartTime: z
     .string()
     .regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Formato de hora inválido"),
@@ -32,23 +30,11 @@ export const insertEmployeeSchema = z.object({
     .record(
       z.string(),
       z.object({
-        startTime: z
-          .string()
-          .regex(
-            /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
-            "Formato de hora inválido"
-          ),
-        endTime: z
-          .string()
-          .regex(
-            /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
-            "Formato de hora inválido"
-          ),
+        startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+        endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
       })
     )
     .optional(),
-  // <-- Add notes here:
-  notes: z.string().optional(),
 });
 
 export const updateEmployeeSchema = insertEmployeeSchema.partial().extend({
@@ -58,22 +44,18 @@ export const updateEmployeeSchema = insertEmployeeSchema.partial().extend({
 export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
 export type UpdateEmployee = z.infer<typeof updateEmployeeSchema>;
 
-/**
- * Full Employee record, includes timestamps and optional notes.
- */
 export interface Employee extends InsertEmployee {
   id: string;
   createdAt: string;
   updatedAt: string;
-  notes?: string;
 }
 
 /* =========================================================
- * HOLIDAYS (Suporta formato legado e novo)
+ * HOLIDAYS
  * =======================================================*/
 const baseHolidaySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  date: z.string().optional(), // legado: "MM-DD" ou "YYYY-MM-DD"
+  date: z.string().optional(), // legacy "MM-DD" or "YYYY-MM-DD"
   month: z.number().min(1).max(12).optional(),
   day: z.number().min(1).max(31).optional(),
   description: z.string().optional(),
@@ -81,26 +63,32 @@ const baseHolidaySchema = z.object({
 
 export const insertHolidaySchema = baseHolidaySchema.transform((data) => {
   if (data.date && !data.month && !data.day) {
-    const match = data.date.match(/^(\d{4}-)?(\d{2})-(\d{2})$/);
-    if (match) {
-      data.month = parseInt(match[2], 10);
-      data.day = parseInt(match[3], 10);
-      data.date = `${match[2]}-${match[3]}`;
-    }
-  } else if (data.month && data.day) {
-    const m = String(data.month).padStart(2, "0");
-    const d = String(data.day).padStart(2, "0");
+    const m =
+      data.date.length === 10 && data.date.includes("-")
+        ? data.date.substring(5, 7)
+        : data.date.split("-")[0];
+    const d =
+      data.date.length === 10 && data.date.includes("-")
+        ? data.date.substring(8, 10)
+        : data.date.split("-")[1];
+    data.month = parseInt(m, 10);
+    data.day = parseInt(d, 10);
     data.date = `${m}-${d}`;
+  } else if (data.month && data.day) {
+    const mm = String(data.month).padStart(2, "0");
+    const dd = String(data.day).padStart(2, "0");
+    data.date = `${mm}-${dd}`;
   }
   return data;
 });
 
-export const updateHolidaySchema = baseHolidaySchema.partial().extend({
-  id: z.string(),
-});
+export const updateHolidaySchema = baseHolidaySchema
+  .partial()
+  .extend({ id: z.string() });
 
 export type InsertHoliday = z.infer<typeof insertHolidaySchema>;
 export type UpdateHoliday = z.infer<typeof updateHolidaySchema>;
+
 export interface Holiday extends InsertHoliday {
   id: string;
   createdAt: string;
@@ -114,10 +102,15 @@ export const assignmentSchema = z.object({
   id: z.string(),
   employeeId: z.string(),
   employeeName: z.string(),
-  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  startTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido"),
+  endTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido"),
 });
 export type Assignment = z.infer<typeof assignmentSchema>;
+
 export const insertAssignmentSchema = assignmentSchema.omit({ id: true });
 export type InsertAssignment = z.infer<typeof insertAssignmentSchema>;
 
@@ -145,12 +138,34 @@ export const monthlyScheduleSchema = z.object({
   year: z.number(),
   month: z.number().min(1).max(12),
   days: z.array(scheduleDaySchema),
-  rotationState: z.object({ lastWeekendIndex: z.number() }).optional(),
+  rotationState: z
+    .object({
+      lastSwap: z.boolean(),
+    })
+    .optional(),
   generatedAt: z.string(),
   updatedAt: z.string(),
   version: z.number().default(1),
 });
 export type MonthlySchedule = z.infer<typeof monthlyScheduleSchema>;
+
+/* =========================================================
+ * REQUESTS
+ * =======================================================*/
+
+// Body for POST /api/schedule/generate
+export const generateMonthlyScheduleSchema = z.object({
+  year: z.number().min(2020).max(2030),
+  month: z.number().min(1).max(12),
+});
+export type GenerateMonthlyScheduleRequest = z.infer<
+  typeof generateMonthlyScheduleSchema
+>;
+
+/* =========================================================
+ * COMPAT: ScheduleEntry for legacy front
+ * =======================================================*/
+export type ScheduleEntry = ScheduleDay;
 
 /* =========================================================
  * VACATION
@@ -180,16 +195,14 @@ export const insertVacationSchema = vacationSchema.omit({
 export const updateVacationSchema = insertVacationSchema.partial();
 export type Vacation = z.infer<typeof vacationSchema>;
 export type InsertVacation = z.infer<typeof insertVacationSchema>;
-export type UpdateVacation = z.infer<typeof updateVacationSchema>;
 
 /* =========================================================
  * UTILITÁRIOS
  * =======================================================*/
 export function normalizeTime(time: string): string {
-  const match = time.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return time;
-  const [, h, m] = match;
-  return `${h.padStart(2, "0")}:${m}`;
+  const m = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return time;
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
 }
 
 export function isWeekend(date: Date): boolean {
@@ -201,20 +214,29 @@ export function isHoliday(
   date: Date,
   holidays: Holiday[]
 ): Holiday | undefined {
-  const targetMonth = date.getMonth() + 1;
-  const targetDay = date.getDate();
-  return holidays.find((holiday) => {
-    if (holiday.month && holiday.day) {
-      return holiday.month === targetMonth && holiday.day === targetDay;
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  return holidays.find((h) => {
+    if (h.month && h.day) return h.month === m && h.day === d;
+    if (h.date?.length === 5) {
+      const [mm, dd] = h.date.split("-").map(Number);
+      return mm === m && dd === d;
     }
-    if (holiday.date) {
-      if (holiday.date.length === 5) {
-        const [m, d] = holiday.date.split("-").map(Number);
-        return m === targetMonth && d === targetDay;
-      }
-      const iso = date.toISOString().split("T")[0];
-      return holiday.date === iso;
+    if (h.date?.length === 10) {
+      return h.date === date.toISOString().split("T")[0];
     }
     return false;
   });
+}
+
+export function getWeekNumber(date: Date): number {
+  const target = new Date(date);
+  const dayNr = (date.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
+  }
+  return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
 }
