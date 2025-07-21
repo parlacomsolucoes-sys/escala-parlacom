@@ -13,9 +13,11 @@ export default function EmployeesPage() {
   const { toast } = useToast();
   const { data: employees = [], isLoading } = useEmployees();
   const deleteEmployee = useDeleteEmployee();
-  
+
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | undefined>();
+  const [selectedEmployee, setSelectedEmployee] = useState<
+    Employee | undefined
+  >();
 
   const handleCreateEmployee = () => {
     setSelectedEmployee(undefined);
@@ -29,7 +31,7 @@ export default function EmployeesPage() {
 
   const handleDeleteEmployee = async (employee: Employee) => {
     if (!confirm(`Tem certeza que deseja excluir ${employee.name}?`)) return;
-    
+
     try {
       await deleteEmployee.mutateAsync(employee.id);
       toast({
@@ -55,8 +57,8 @@ export default function EmployeesPage() {
       friday: "Sex",
       saturday: "Sáb",
     };
-    
-    return workDays.map(day => dayMap[day] || day);
+
+    return workDays.map((day) => dayMap[day] || day);
   };
 
   const getEmployeeColor = (index: number) => {
@@ -101,9 +103,11 @@ export default function EmployeesPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Funcionários</h2>
-            <p className="text-gray-600 mt-1">Gerencie funcionários e seus horários de trabalho</p>
+            <p className="text-gray-600 mt-1">
+              Gerencie funcionários, suas informações e horários de trabalho
+            </p>
           </div>
-          
+
           {/* Add Employee Button (Admin Only) */}
           {user && (
             <Button
@@ -115,7 +119,7 @@ export default function EmployeesPage() {
             </Button>
           )}
         </div>
-        
+
         {/* Employees Table */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -134,6 +138,9 @@ export default function EmployeesPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Observações
+                  </th>
                   {user && (
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Ações
@@ -144,10 +151,15 @@ export default function EmployeesPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {employees.length === 0 ? (
                   <tr>
-                    <td colSpan={user ? 5 : 4} className="px-6 py-8 text-center">
+                    <td
+                      colSpan={user ? 6 : 5}
+                      className="px-6 py-8 text-center"
+                    >
                       <div className="flex flex-col items-center">
                         <User className="h-12 w-12 text-gray-400 mb-4" />
-                        <p className="text-gray-500">Nenhum funcionário cadastrado</p>
+                        <p className="text-gray-500">
+                          Nenhum funcionário cadastrado
+                        </p>
                         {user && (
                           <Button
                             onClick={handleCreateEmployee}
@@ -165,46 +177,76 @@ export default function EmployeesPage() {
                     <tr key={employee.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className={`h-10 w-10 rounded-full flex items-center justify-center ${getEmployeeColor(index)}`}>
+                          <div
+                            className={`h-10 w-10 rounded-full flex items-center justify-center ${getEmployeeColor(
+                              index
+                            )}`}
+                          >
                             <User size={20} />
                           </div>
                           <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">{employee.name}</div>
-                            <div className="text-sm text-gray-500">ID: #{employee.id.slice(-6)}</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {employee.name}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              ID: #{employee.id.slice(-6)}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-wrap gap-1">
                           {getWorkDaysDisplay(employee.workDays).map((day) => (
-                            <Badge key={day} variant="secondary" className="text-xs">
+                            <Badge
+                              key={day}
+                              variant="secondary"
+                              className="text-xs"
+                            >
                               {day}
                             </Badge>
                           ))}
                           {employee.weekendRotation && (
-                            <Badge variant="outline" className="text-xs border-yellow-300 text-yellow-700 bg-yellow-50">
+                            <Badge
+                              variant="outline"
+                              className="text-xs border-yellow-300 text-yellow-700 bg-yellow-50"
+                            >
                               <RotateCcw size={12} className="mr-1" />
                               Revezamento
                             </Badge>
                           )}
-                          {employee.customSchedule && Object.keys(employee.customSchedule).length > 0 && (
-                            <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 bg-blue-50">
-                              Horários Personalizados
-                            </Badge>
-                          )}
+                          {employee.customSchedule &&
+                            Object.keys(employee.customSchedule).length > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="text-xs border-blue-300 text-blue-700 bg-blue-50"
+                              >
+                                Horários Personalizados
+                              </Badge>
+                            )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {employee.defaultStartTime} - {employee.defaultEndTime}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <Badge 
+                        <Badge
                           variant={employee.isActive ? "default" : "secondary"}
-                          className={employee.isActive ? "bg-green-100 text-green-800" : ""}
+                          className={
+                            employee.isActive
+                              ? "bg-green-100 text-green-800"
+                              : ""
+                          }
                         >
-                          <div className={`w-2 h-2 rounded-full mr-1.5 ${employee.isActive ? "bg-green-400" : "bg-gray-400"}`}></div>
+                          <div
+                            className={`w-2 h-2 rounded-full mr-1.5 ${
+                              employee.isActive ? "bg-green-400" : "bg-gray-400"
+                            }`}
+                          ></div>
                           {employee.isActive ? "Ativo" : "Inativo"}
                         </Badge>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {employee.notes || "—"}
                       </td>
                       {user && (
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

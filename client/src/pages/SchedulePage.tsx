@@ -1,6 +1,4 @@
-// src/pages/SchedulePage.tsx
-
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,6 +13,7 @@ import {
   useSchedule,
   useHolidays,
   useGenerateMonthlySchedule,
+  useEmployees,
 } from "@/hooks/useSchedule";
 import { useVacations } from "@/hooks/useVacations";
 import { useToast } from "@/hooks/use-toast";
@@ -51,21 +50,30 @@ export default function SchedulePage() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
 
-  // Escala mensal
+  // Employees (needed so that adding/removing users will trigger schedule refresh)
+  const { data: employees = [] } = useEmployees();
+
+  // Vacations (so schedule updates when vacations change)
+  const { data: vacations = [] } = useVacations(year);
+
+  // Holidays (so schedule updates when holidays change)
+  const { data: holidays = [], isLoading: holidaysLoading } = useHolidays();
+
+  // Monthly schedule query
   const {
     data: scheduleEntries = [],
     isLoading: scheduleLoading,
     isFetching: scheduleFetching,
     error: scheduleError,
+    refetch: refetchSchedule,
   } = useSchedule(year, month);
 
-  // Feriados recorrentes
-  const { data: holidays = [], isLoading: holidaysLoading } = useHolidays();
+  // Whenever employees, vacations or holidays change, refetch the monthly schedule
+  useEffect(() => {
+    refetchSchedule();
+  }, [employees, vacations, holidays, year, month, refetchSchedule]);
 
-  // Períodos de férias
-  const { data: vacations = [] } = useVacations(year);
-
-  // Geração de escala
+  // Mutation to regenerate full month
   const generateSchedule = useGenerateMonthlySchedule();
 
   const formatMonthYear = (date: Date) =>
@@ -120,10 +128,7 @@ export default function SchedulePage() {
   const nextVacations = useMemo(() => {
     const today = new Date();
     return vacations
-      .map((v) => ({
-        ...v,
-        start: new Date(v.startDate),
-      }))
+      .map((v) => ({ ...v, start: new Date(v.startDate) }))
       .filter((v) => v.start >= today)
       .sort((a, b) => a.start.getTime() - b.start.getTime())
       .slice(0, 3);
@@ -226,10 +231,7 @@ export default function SchedulePage() {
 
   /* ================= Handlers ================= */
   const handleDayClick = (day: CalendarDay) => {
-    setSelectedDay({
-      date: day.dateString,
-      assignments: day.assignments,
-    });
+    setSelectedDay({ date: day.dateString, assignments: day.assignments });
   };
 
   const navigateWeek = (direction: "prev" | "next") => {
@@ -310,7 +312,7 @@ export default function SchedulePage() {
           )}
         </div>
 
-        {/* Controles de visão e geração */}
+        {/* View controls & generate */}
         <div className="flex items-center space-x-4">
           <div className="bg-white rounded-lg border border-gray-200 p-1 flex">
             <Button
